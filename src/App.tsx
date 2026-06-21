@@ -18,6 +18,7 @@ interface Expense {
   title: string;
   amount: number;
   date: string;
+  time?: string;
   categoryId: string;
   hasReceipt?: boolean;
 }
@@ -25,6 +26,18 @@ interface Expense {
 // Formatter for currency
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-MY', { style: 'currency', currency: 'MYR' }).format(amount);
+};
+
+// Helper to format 24h time string (e.g. "18:15") to 12h format (e.g. "6:15 PM")
+const formatTime12h = (time24?: string) => {
+  if (!time24) return '';
+  const [hoursStr, minutesStr] = time24.split(':');
+  if (!hoursStr || !minutesStr) return time24;
+  let hours = parseInt(hoursStr, 10);
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  return `${hours}:${minutesStr} ${ampm}`;
 };
 
 export default function App() {
@@ -39,6 +52,14 @@ export default function App() {
   
   // New: Date State defaulting to today (YYYY-MM-DD)
   const [dateInput, setDateInput] = useState(() => new Date().toISOString().split('T')[0]);
+
+  // New: Time State defaulting to now (HH:MM in 24h format)
+  const [timeInput, setTimeInput] = useState(() => {
+    const now = new Date();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    return `${hh}:${mm}`;
+  });
   
   // New: Dark Mode State
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -160,7 +181,7 @@ export default function App() {
               content: [
                 {
                   type: "text",
-                  text: "Analyze this receipt. Return ONLY a valid JSON object with these exact keys:\n1. 'amount' (number, the final total price, NO currency symbols or commas).\n2. 'title' (string, the merchant name AND a concise list of main items purchased, e.g. \"Walmart - Milk, Bread, Apples\"). This is crucial for later searching.\n3. 'date' (string, YYYY-MM-DD. If missing, omit the key).\n4. 'category' (string, choose exactly one from: 'food', 'coffee', 'transport', 'shopping', 'entertainment', 'other').\nIf the image is not a receipt or is completely unreadable, return {\"error\": \"Unreadable receipt\"}.\nDo not use markdown code blocks like ```json."
+                  text: "Analyze this receipt. Return ONLY a valid JSON object with these exact keys:\n1. 'amount' (number, the final total price, NO currency symbols or commas).\n2. 'title' (string, the merchant name AND a concise list of main items purchased, e.g. \"Walmart - Milk, Bread, Apples\"). This is crucial for later searching.\n3. 'date' (string, YYYY-MM-DD. If missing, omit the key).\n4. 'time' (string, HH:MM format in 24-hour clock. If missing, omit the key).\n5. 'category' (string, choose exactly one from: 'food', 'coffee', 'transport', 'shopping', 'entertainment', 'other').\nIf the image is not a receipt or is completely unreadable, return {\"error\": \"Unreadable receipt\"}.\nDo not use markdown code blocks like ```json."
                 },
                 {
                   type: "image_url",
@@ -196,6 +217,7 @@ export default function App() {
       if (parsed.amount) setAmountInput(parsed.amount.toString());
       if (parsed.title) setTitleInput(parsed.title);
       if (parsed.date) setDateInput(parsed.date);
+      if (parsed.time) setTimeInput(parsed.time);
       if (parsed.category) {
         const cat = CATEGORIES.find(c => c.id === parsed.category.toLowerCase());
         if (cat) setSelectedCategory(cat.id);
@@ -221,12 +243,18 @@ export default function App() {
 
     let updatedExpensesList = [...expenses];
 
+    const finalTime = timeInput.trim() || (() => {
+      const now = new Date();
+      return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    })();
+
     if (editingId) {
       updatedExpensesList = expenses.map(exp => exp.id === editingId ? {
         ...exp,
         title: finalTitle,
         amount: parseFloat(amountInput),
         date: formattedDate,
+        time: finalTime,
         categoryId: selectedCategory,
         hasReceipt: !!scannedImage
       } : exp);
@@ -244,6 +272,7 @@ export default function App() {
         title: finalTitle,
         amount: parseFloat(amountInput),
         date: formattedDate,
+        time: finalTime,
         categoryId: selectedCategory,
         hasReceipt: !!scannedImage
       };
@@ -258,6 +287,10 @@ export default function App() {
     setAmountInput('');
     setTitleInput('');
     setDateInput(new Date().toISOString().split('T')[0]);
+    setTimeInput(() => {
+      const now = new Date();
+      return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    });
     setScannedImage(null);
   };
 
@@ -271,6 +304,13 @@ export default function App() {
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
     setDateInput(`${yyyy}-${mm}-${dd}`);
+    
+    if (exp.time) {
+      setTimeInput(exp.time);
+    } else {
+      const now = new Date();
+      setTimeInput(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+    }
 
     if (exp.hasReceipt) {
       getReceipt(exp.id).then(img => {
@@ -719,7 +759,15 @@ export default function App() {
                                   </span>
                                 )}
                               </div>
-                              <span className={`text-[11px] font-medium mt-0.5 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{category.label}</span>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{category.label}</span>
+                                {exp.time && (
+                                  <>
+                                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>•</span>
+                                    <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{formatTime12h(exp.time)}</span>
+                                  </>
+                                )}
+                              </div>
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
@@ -878,30 +926,45 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="flex gap-3">
-                {/* Note Input */}
-                <div className="flex-1">
-                  <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all 
-                                   ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500 focus-within:bg-slate-800' : 'bg-white/60 border-slate-200 focus-within:border-blue-400 focus-within:bg-white'}
-                                   ${scannedImage ? 'border-indigo-500/50 bg-indigo-500/5 dark:bg-indigo-500/10' : ''}`}>
-                    <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>edit_note</span>
-                    <input 
-                      type="text" 
-                      value={titleInput}
-                      onChange={(e) => setTitleInput(e.target.value)}
-                      placeholder="Note (optional)"
-                      className={`w-full bg-transparent border-none outline-none text-sm p-0 ${isDarkMode ? 'text-slate-200 placeholder-slate-600' : 'text-slate-700 placeholder-slate-400'}`}
-                    />
-                  </div>
+              {/* Note Input */}
+              <div className="w-full">
+                <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all 
+                                 ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500 focus-within:bg-slate-800' : 'bg-white/60 border-slate-200 focus-within:border-blue-400 focus-within:bg-white'}
+                                 ${scannedImage ? 'border-indigo-500/50 bg-indigo-500/5 dark:bg-indigo-500/10' : ''}`}>
+                  <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>edit_note</span>
+                  <input 
+                    type="text" 
+                    value={titleInput}
+                    onChange={(e) => setTitleInput(e.target.value)}
+                    placeholder="Note (optional)"
+                    className={`w-full bg-transparent border-none outline-none text-sm p-0 ${isDarkMode ? 'text-slate-200 placeholder-slate-600' : 'text-slate-700 placeholder-slate-400'}`}
+                  />
                 </div>
+              </div>
 
+              {/* Date & Time Row */}
+              <div className="flex gap-3">
                 {/* Date Input */}
-                <div className="w-36 shrink-0">
+                <div className="flex-1">
                   <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500 focus-within:bg-slate-800' : 'bg-white/60 border-slate-200 focus-within:border-blue-400 focus-within:bg-white'}`}>
+                    <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>calendar_today</span>
                     <input 
                       type="date" 
                       value={dateInput}
                       onChange={(e) => setDateInput(e.target.value)}
+                      className={`w-full bg-transparent border-none outline-none text-sm p-0 [&::-webkit-calendar-picker-indicator]:opacity-50 hover:[&::-webkit-calendar-picker-indicator]:opacity-100 ${isDarkMode ? 'text-slate-200 [&::-webkit-calendar-picker-indicator]:invert' : 'text-slate-700'}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Time Input */}
+                <div className="flex-1">
+                  <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500 focus-within:bg-slate-800' : 'bg-white/60 border-slate-200 focus-within:border-blue-400 focus-within:bg-white'}`}>
+                    <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>schedule</span>
+                    <input 
+                      type="time" 
+                      value={timeInput}
+                      onChange={(e) => setTimeInput(e.target.value)}
                       className={`w-full bg-transparent border-none outline-none text-sm p-0 [&::-webkit-calendar-picker-indicator]:opacity-50 hover:[&::-webkit-calendar-picker-indicator]:opacity-100 ${isDarkMode ? 'text-slate-200 [&::-webkit-calendar-picker-indicator]:invert' : 'text-slate-700'}`}
                     />
                   </div>
