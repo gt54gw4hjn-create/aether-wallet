@@ -908,19 +908,45 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Submit Button */}
-              <button 
-                type="submit" 
-                className={`w-full py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer border-0 outline-none
-                          ${amountInput && parseFloat(amountInput) > 0 
-                            ? (editingId ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/25 active:scale-[0.98]' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/25 active:scale-[0.98]')
-                            : (isDarkMode ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed')}`}
-              >
-                <span className="material-symbols-outlined text-[20px]">
-                  {editingId ? 'check_circle' : 'add_circle'}
-                </span>
-                {editingId ? 'Update Expense' : 'Add Expense'}
-              </button>
+              {/* Submit / Action Buttons */}
+              {editingId ? (
+                <div className="flex gap-3 w-full">
+                  <button 
+                    type="button"
+                    onClick={async (e) => {
+                      if (confirm('Delete this expense?')) {
+                        await handleDeleteExpense(editingId, e as any);
+                        setIsBottomSheetOpen(false);
+                      }
+                    }}
+                    className={`flex-1 py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer border active:scale-[0.98] outline-none
+                               ${isDarkMode 
+                                 ? 'border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400' 
+                                 : 'border-red-200 bg-red-50 hover:bg-red-100 text-red-600'}`}
+                  >
+                    <span className="material-symbols-outlined text-[20px]">delete</span>
+                    Delete
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="flex-[2] py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer border-0 outline-none bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/25 active:scale-[0.98]"
+                  >
+                    <span className="material-symbols-outlined text-[20px]">check_circle</span>
+                    Update Expense
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  type="submit" 
+                  className={`w-full py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer border-0 outline-none
+                            ${amountInput && parseFloat(amountInput) > 0 
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/25 active:scale-[0.98]'
+                              : (isDarkMode ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed')}`}
+                >
+                  <span className="material-symbols-outlined text-[20px]">add_circle</span>
+                  Add Expense
+                </button>
+              )}
             </form>
           </div>
         </div>
