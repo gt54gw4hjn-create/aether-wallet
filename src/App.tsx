@@ -13,6 +13,11 @@ const CATEGORIES = [
   { id: 'other', label: 'Other', icon: 'more_horiz', emoji: '✨', color: '#8e8e93' }, 
 ];
 
+interface Project {
+  id: string;
+  name: string;
+}
+
 interface Expense {
   id: string;
   title: string;
@@ -21,6 +26,8 @@ interface Expense {
   time?: string;
   categoryId: string;
   hasReceipt?: boolean;
+  scopeType?: 'one-off' | 'weekly' | 'monthly' | 'project';
+  projectId?: string;
 }
 
 // Formatter for currency
@@ -84,6 +91,18 @@ export default function App() {
   // Bottom Sheet State
   const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
 
+  // V5 Custom States for Scope and Projects
+  const [projects, setProjects] = useState<Project[]>(() => {
+    const saved = localStorage.getItem('micro_projects');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [currentTab, setCurrentTab] = useState<'transactions' | 'recurrings' | 'projects'>('transactions');
+  const [scopeType, setScopeType] = useState<'one-off' | 'weekly' | 'monthly' | 'project'>('one-off');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [newProjectName, setNewProjectName] = useState<string>('');
+  const [isCreatingNewProject, setIsCreatingNewProject] = useState<boolean>(false);
+  const [selectedProjectDetailId, setSelectedProjectDetailId] = useState<string | null>(null);
+
   // V4 Custom States for Receipts and Swiping
   const [scannedImage, setScannedImage] = useState<string | null>(null);
   const [lightboxReceipt, setLightboxReceipt] = useState<{ url: string; title: string; id: string } | null>(null);
@@ -94,6 +113,7 @@ export default function App() {
   const isSwiping = useRef<boolean>(false);
 
   useEffect(() => localStorage.setItem('micro_expenses', JSON.stringify(expenses)), [expenses]);
+  useEffect(() => localStorage.setItem('micro_projects', JSON.stringify(projects)), [projects]);
   useEffect(() => localStorage.setItem('micro_budget', budgetLimit.toString()), [budgetLimit]);
   useEffect(() => {
     localStorage.setItem('micro_theme', isDarkMode ? 'dark' : 'light');
@@ -231,6 +251,24 @@ export default function App() {
     }
   };
 
+  const handleOpenNewBottomSheet = () => {
+    setEditingId(null);
+    setAmountInput('');
+    setTitleInput('');
+    setSelectedCategory('food');
+    setDateInput(new Date().toISOString().split('T')[0]);
+    setTimeInput(() => {
+      const now = new Date();
+      return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    });
+    setScopeType('one-off');
+    setSelectedProjectId(projects[0]?.id || '');
+    setIsCreatingNewProject(false);
+    setNewProjectName('');
+    setScannedImage(null);
+    setIsBottomSheetOpen(true);
+  };
+
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!amountInput || parseFloat(amountInput) <= 0) return;
@@ -248,6 +286,18 @@ export default function App() {
       return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     })();
 
+    let finalProjId: string | undefined = undefined;
+    if (scopeType === 'project') {
+      if (isCreatingNewProject && newProjectName.trim()) {
+        const newProjId = 'proj_' + Date.now();
+        const newProj = { id: newProjId, name: newProjectName.trim() };
+        setProjects(prev => [...prev, newProj]);
+        finalProjId = newProjId;
+      } else {
+        finalProjId = selectedProjectId || undefined;
+      }
+    }
+
     if (editingId) {
       updatedExpensesList = expenses.map(exp => exp.id === editingId ? {
         ...exp,
@@ -256,7 +306,9 @@ export default function App() {
         date: formattedDate,
         time: finalTime,
         categoryId: selectedCategory,
-        hasReceipt: !!scannedImage
+        hasReceipt: !!scannedImage,
+        scopeType,
+        projectId: finalProjId
       } : exp);
       
       if (scannedImage) {
@@ -274,7 +326,9 @@ export default function App() {
         date: formattedDate,
         time: finalTime,
         categoryId: selectedCategory,
-        hasReceipt: !!scannedImage
+        hasReceipt: !!scannedImage,
+        scopeType,
+        projectId: finalProjId
       };
       
       updatedExpensesList = [newExpense, ...expenses];
@@ -291,6 +345,10 @@ export default function App() {
       const now = new Date();
       return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     });
+    setScopeType('one-off');
+    setSelectedProjectId('');
+    setIsCreatingNewProject(false);
+    setNewProjectName('');
     setScannedImage(null);
   };
 
@@ -312,6 +370,11 @@ export default function App() {
       setTimeInput(`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
     }
 
+    setScopeType(exp.scopeType || 'one-off');
+    setSelectedProjectId(exp.projectId || '');
+    setIsCreatingNewProject(false);
+    setNewProjectName('');
+
     if (exp.hasReceipt) {
       getReceipt(exp.id).then(img => {
         if (img) setScannedImage(img);
@@ -332,6 +395,161 @@ export default function App() {
       setTitleInput('');
       setScannedImage(null);
     }
+  };
+
+  const handleDeleteProject = (projId: string) => {
+    if (!confirm('Are you sure you want to delete this project? Expenses in this project will not be deleted, but will be changed to one-off.')) {
+      return;
+    }
+    setProjects(prev => prev.filter(p => p.id !== projId));
+    setExpenses(prev => prev.map(exp => exp.projectId === projId ? {
+      ...exp,
+      scopeType: 'one-off',
+      projectId: undefined
+    } : exp));
+    if (selectedProjectDetailId === projId) {
+      setSelectedProjectDetailId(null);
+    }
+  };
+
+  const renderExpenseItem = (exp: Expense, index: number) => {
+    const category = CATEGORIES.find(c => c.id === exp.categoryId) || CATEGORIES[5];
+    const isEditingThis = editingId === exp.id;
+    const isSwiped = swipeActiveId === exp.id;
+    const translateStyle = isSwiped ? `translateX(${swipeDistance}px)` : 'translateX(0)';
+    const transitionStyle = isSwiped && isSwiping.current ? 'none' : 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+    
+    return (
+      <div 
+        key={exp.id}
+        className="relative overflow-hidden rounded-2xl w-full select-none"
+      >
+        {/* Swipe Action Background Layer */}
+        <div className="absolute inset-0 flex items-center justify-between z-0 rounded-2xl">
+          {/* Left Swipe Action (Edit) */}
+          <div 
+            onClick={() => {
+              handleEditClick(exp);
+              setSwipeActiveId(null);
+              setSwipeDistance(0);
+            }}
+            className="h-full bg-indigo-600 text-white px-5 flex items-center justify-start rounded-l-2xl cursor-pointer w-20 transition-opacity"
+            style={{ opacity: swipeDistance > 0 ? 1 : 0 }}
+          >
+            <span className="material-symbols-outlined text-white text-[20px]">edit</span>
+          </div>
+          
+          {/* Right Swipe Action (Delete) */}
+          <div 
+            onClick={(e) => {
+              handleDeleteExpense(exp.id, e);
+              setSwipeActiveId(null);
+              setSwipeDistance(0);
+            }}
+            className="h-full bg-red-600 text-white px-5 flex items-center justify-end rounded-r-2xl cursor-pointer w-20 ml-auto transition-opacity"
+            style={{ opacity: swipeDistance < 0 ? 1 : 0 }}
+          >
+            <span className="material-symbols-outlined text-white text-[20px]">delete</span>
+          </div>
+        </div>
+
+        {/* Foreground Card */}
+        <div 
+          onClick={() => {
+            if (isSwiped && Math.abs(swipeDistance) > 10) {
+              setSwipeActiveId(null);
+              setSwipeDistance(0);
+            } else {
+              handleEditClick(exp);
+            }
+          }}
+          onTouchStart={(e) => handleTouchStart(e, exp.id)}
+          onTouchMove={(e) => handleTouchMove(e, exp.id)}
+          onTouchEnd={() => handleTouchEnd()}
+          className={`relative z-10 flex items-center justify-between p-3.5 rounded-2xl border cursor-pointer animate-in fade-in slide-in-from-bottom-2
+                     ${isEditingThis 
+                       ? (isDarkMode ? 'bg-slate-800 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-blue-50 border-blue-200 shadow-md')
+                       : (isDarkMode 
+                           ? 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800' 
+                           : 'bg-white border-slate-200/60 shadow-sm hover:shadow-md')}`}
+          style={{ 
+            transform: translateStyle, 
+            transition: transitionStyle,
+            animationDelay: `${index * 30}ms`, 
+            animationFillMode: 'both' 
+          }}
+        >
+          <div className="flex items-center gap-3.5">
+            <div 
+              className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 transition-colors"
+              style={{ 
+                backgroundColor: isDarkMode ? `${category.color}15` : `${category.color}0D`,
+                borderColor: isDarkMode ? `${category.color}30` : `${category.color}20`
+              }}
+            >
+              <span className="material-symbols-outlined text-[20px] font-semibold" style={{ color: category.color }}>
+                {category.icon}
+              </span>
+            </div>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1.5">
+                <span className={`text-[15px] font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{exp.title}</span>
+                {exp.hasReceipt && (
+                  <span 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleViewReceipt(exp.id, exp.title);
+                    }}
+                    title="View receipt"
+                    className={`material-symbols-outlined text-[15px] px-1 rounded flex items-center justify-center cursor-pointer transition-colors
+                               ${isDarkMode ? 'text-indigo-400 hover:text-indigo-300 hover:bg-slate-700' : 'text-indigo-600 hover:text-indigo-500 hover:bg-indigo-50'}`}
+                  >
+                    receipt_long
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{category.label}</span>
+                {exp.time && (
+                  <>
+                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>•</span>
+                    <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{formatTime12h(exp.time)}</span>
+                  </>
+                )}
+                {exp.scopeType && exp.scopeType !== 'one-off' && (
+                  <>
+                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>•</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold transition-colors
+                                     ${exp.scopeType === 'weekly' 
+                                       ? (isDarkMode ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-amber-50 text-amber-700 border border-amber-200') 
+                                       : exp.scopeType === 'monthly' 
+                                         ? (isDarkMode ? 'bg-purple-500/10 text-purple-400 border border-purple-500/20' : 'bg-purple-50 text-purple-700 border border-purple-200')
+                                         : (isDarkMode ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20' : 'bg-cyan-50 text-cyan-700 border border-cyan-200')}`}>
+                      {exp.scopeType === 'weekly' && 'Weekly'}
+                      {exp.scopeType === 'monthly' && 'Monthly'}
+                      {exp.scopeType === 'project' && (() => {
+                        const p = projects.find(proj => proj.id === exp.projectId);
+                        return p ? p.name : 'Project';
+                      })()}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`text-base font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>-{formatCurrency(exp.amount)}</span>
+            <button 
+              onClick={(e) => handleDeleteExpense(exp.id, e)}
+              className={`opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity p-2 rounded-full border-0 bg-transparent cursor-pointer flex items-center justify-center -mr-1 outline-none
+                         ${isDarkMode ? 'text-red-400 hover:bg-red-900/30' : 'text-red-500 hover:bg-red-50'}`}
+            >
+              <span className="material-symbols-outlined text-sm">close</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const handleResetExpenses = () => {
@@ -617,184 +835,308 @@ export default function App() {
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col w-full relative">
           
-          {/* History List */}
-          <div className={`flex-1 flex flex-col relative ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
-          
-          {/* Sticky Search Bar */}
-          <div className={`sticky top-0 z-20 px-6 py-4 backdrop-blur-xl border-b transition-colors ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-white/40 border-slate-200/50'}`}>
-            <div className="relative group">
-              <span className={`absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-blue-400' : 'text-slate-400 group-focus-within:text-blue-500'}`}>search</span>
-              <input 
-                type="text" 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search notes or amounts..."
-                className={`w-full pl-10 pr-4 py-2.5 rounded-xl text-sm outline-none transition-all
-                           ${isDarkMode 
-                             ? 'bg-slate-900/50 border border-slate-700/50 text-slate-200 placeholder-slate-500 focus:bg-slate-800/80 focus:border-blue-500/50 focus:shadow-[0_0_10px_rgba(59,130,246,0.1)]' 
-                             : 'bg-white/60 border border-slate-200 text-slate-700 placeholder-slate-400 focus:bg-white focus:border-blue-400 focus:shadow-sm'}`}
-              />
-              {searchQuery && (
-                <button 
-                  onClick={() => setSearchQuery('')}
-                  className={`absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] rounded-full p-0.5 border-0 cursor-pointer transition-colors
-                             ${isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
-                >
-                  close
-                </button>
-              )}
+          {/* Segmented Tab Selector */}
+          <div className={`px-6 pt-4 pb-2 border-b shrink-0 transition-colors ${isDarkMode ? 'bg-black/20 border-white/5' : 'bg-slate-50/30 border-slate-200/50'}`}>
+            <div className={`flex p-1 rounded-2xl border ${isDarkMode ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-100/80 border-slate-200'}`}>
+              {(['transactions', 'recurrings', 'projects'] as const).map(tab => {
+                const isSelected = currentTab === tab;
+                const labels = { transactions: 'Transactions', recurrings: 'Commitments', projects: 'Projects' };
+                const icons = { transactions: 'receipt_long', recurrings: 'autorenew', projects: 'folder' };
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => {
+                      setCurrentTab(tab);
+                      setSelectedProjectDetailId(null); // Reset drilldown when switching tabs
+                    }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all border-0 outline-none cursor-pointer
+                               ${isSelected 
+                                 ? (isDarkMode ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm') 
+                                 : (isDarkMode ? 'text-slate-500 hover:text-slate-400' : 'text-slate-500 hover:text-slate-600')}`}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">{icons[tab]}</span>
+                    {labels[tab]}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
-          <div className="px-6 pb-8">
-            {Object.keys(groupedExpenses).length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 opacity-40">
-                <span className={`material-symbols-outlined text-4xl mb-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {searchQuery ? 'search_off' : 'receipt_long'}
-                </span>
-                <p className={`text-sm font-medium m-0 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                  {searchQuery ? `No notes found matching "${searchQuery}"` : "No transactions found"}
-                </p>
-              </div>
-          ) : (
-            Object.entries(groupedExpenses).map(([dateGroup, groupExpenses]) => (
-              <div key={dateGroup} className="mb-4">
-                <div className={`sticky top-0 py-2 backdrop-blur-md z-10 ${isDarkMode ? 'bg-black/60' : 'bg-slate-50/90'}`}>
-                  <h3 className={`text-[11px] font-bold uppercase tracking-widest m-0 pl-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{dateGroup}</h3>
+          {/* Tab 1: Transactions List */}
+          {currentTab === 'transactions' && (
+            <div className={`flex-1 flex flex-col relative ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
+              {/* Sticky Search Bar */}
+              <div className={`sticky top-0 z-20 px-6 py-4 backdrop-blur-xl border-b transition-colors ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-white/40 border-slate-200/50'}`}>
+                <div className="relative group">
+                  <span className={`absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-blue-400' : 'text-slate-400 group-focus-within:text-blue-500'}`}>search</span>
+                  <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search notes or amounts..."
+                    className={`w-full pl-10 pr-4 py-2.5 rounded-xl text-sm outline-none transition-all
+                               ${isDarkMode 
+                                 ? 'bg-slate-900/50 border border-slate-700/50 text-slate-200 placeholder-slate-500 focus:bg-slate-800/80 focus:border-blue-500/50 focus:shadow-[0_0_10px_rgba(59,130,246,0.1)]' 
+                                 : 'bg-white/60 border border-slate-200 text-slate-700 placeholder-slate-400 focus:bg-white focus:border-blue-400 focus:shadow-sm'}`}
+                  />
+                  {searchQuery && (
+                    <button 
+                      onClick={() => setSearchQuery('')}
+                      className={`absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] rounded-full p-0.5 border-0 cursor-pointer transition-colors
+                                 ${isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+                    >
+                      close
+                    </button>
+                  )}
                 </div>
-                <div className="space-y-2 mt-1">
-                  {groupExpenses.map((exp, i) => {
-                    const category = CATEGORIES.find(c => c.id === exp.categoryId) || CATEGORIES[5];
-                    const isEditingThis = editingId === exp.id;
-                    const isSwiped = swipeActiveId === exp.id;
-                    const translateStyle = isSwiped ? `translateX(${swipeDistance}px)` : 'translateX(0)';
-                    const transitionStyle = isSwiped && isSwiping.current ? 'none' : 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
-                    
-                    return (
-                      <div 
-                        key={exp.id}
-                        className="relative overflow-hidden rounded-2xl w-full select-none"
-                      >
-                        {/* Swipe Action Background Layer */}
-                        <div className="absolute inset-0 flex items-center justify-between z-0 rounded-2xl">
-                          {/* Left Swipe Action (Edit) */}
-                          <div 
-                            onClick={() => {
-                              handleEditClick(exp);
-                              setSwipeActiveId(null);
-                              setSwipeDistance(0);
-                            }}
-                            className="h-full bg-indigo-600 text-white px-5 flex items-center justify-start rounded-l-2xl cursor-pointer w-20 transition-opacity"
-                            style={{ opacity: swipeDistance > 0 ? 1 : 0 }}
-                          >
-                            <span className="material-symbols-outlined text-white text-[20px]">edit</span>
-                          </div>
-                          
-                          {/* Right Swipe Action (Delete) */}
-                          <div 
-                            onClick={(e) => {
-                              handleDeleteExpense(exp.id, e);
-                              setSwipeActiveId(null);
-                              setSwipeDistance(0);
-                            }}
-                            className="h-full bg-red-600 text-white px-5 flex items-center justify-end rounded-r-2xl cursor-pointer w-20 ml-auto transition-opacity"
-                            style={{ opacity: swipeDistance < 0 ? 1 : 0 }}
-                          >
-                            <span className="material-symbols-outlined text-white text-[20px]">delete</span>
-                          </div>
-                        </div>
+              </div>
 
-                        {/* Foreground Card */}
-                        <div 
-                          onClick={() => {
-                            if (isSwiped && Math.abs(swipeDistance) > 10) {
-                              setSwipeActiveId(null);
-                              setSwipeDistance(0);
-                            } else {
-                              handleEditClick(exp);
-                            }
-                          }}
-                          onTouchStart={(e) => handleTouchStart(e, exp.id)}
-                          onTouchMove={(e) => handleTouchMove(e, exp.id)}
-                          onTouchEnd={() => handleTouchEnd()}
-                          className={`relative z-10 flex items-center justify-between p-3.5 rounded-2xl border cursor-pointer animate-in fade-in slide-in-from-bottom-2
-                                     ${isEditingThis 
-                                       ? (isDarkMode ? 'bg-slate-800 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-blue-50 border-blue-200 shadow-md')
-                                       : (isDarkMode 
-                                           ? 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800' 
-                                           : 'bg-white border-slate-200/60 shadow-sm hover:shadow-md')}`}
-                          style={{ 
-                            transform: translateStyle, 
-                            transition: transitionStyle,
-                            animationDelay: `${i * 30}ms`, 
-                            animationFillMode: 'both' 
-                          }}
-                        >
-                          <div className="flex items-center gap-3.5">
-                            <div 
-                              className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 transition-colors"
-                              style={{ 
-                                backgroundColor: isDarkMode ? `${category.color}15` : `${category.color}0D`,
-                                borderColor: isDarkMode ? `${category.color}30` : `${category.color}20`
-                              }}
-                            >
-                              <span className="material-symbols-outlined text-[20px] font-semibold" style={{ color: category.color }}>
-                                {category.icon}
-                              </span>
-                            </div>
-                            <div className="flex flex-col">
-                              <div className="flex items-center gap-1.5">
-                                <span className={`text-[15px] font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{exp.title}</span>
-                                {exp.hasReceipt && (
-                                  <span 
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleViewReceipt(exp.id, exp.title);
-                                    }}
-                                    title="View receipt"
-                                    className={`material-symbols-outlined text-[15px] px-1 rounded flex items-center justify-center cursor-pointer transition-colors
-                                               ${isDarkMode ? 'text-indigo-400 hover:text-indigo-300 hover:bg-slate-700' : 'text-indigo-600 hover:text-indigo-500 hover:bg-indigo-50'}`}
-                                  >
-                                    receipt_long
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-1.5 mt-0.5">
-                                <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{category.label}</span>
-                                {exp.time && (
-                                  <>
-                                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>•</span>
-                                    <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{formatTime12h(exp.time)}</span>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className={`text-base font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>-{formatCurrency(exp.amount)}</span>
-                            <button 
-                              onClick={(e) => handleDeleteExpense(exp.id, e)}
-                              className={`opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity p-2 rounded-full border-0 bg-transparent cursor-pointer flex items-center justify-center -mr-1 outline-none
-                                         ${isDarkMode ? 'text-red-400 hover:bg-red-900/30' : 'text-red-500 hover:bg-red-50'}`}
-                            >
-                              <span className="material-symbols-outlined text-sm">close</span>
-                            </button>
-                          </div>
-                        </div>
+              <div className="px-6 pb-24 pt-4">
+                {Object.keys(groupedExpenses).length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-10 opacity-40">
+                    <span className={`material-symbols-outlined text-4xl mb-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {searchQuery ? 'search_off' : 'receipt_long'}
+                    </span>
+                    <p className={`text-sm font-medium m-0 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      {searchQuery ? `No notes found matching "${searchQuery}"` : "No transactions found"}
+                    </p>
+                  </div>
+                ) : (
+                  Object.entries(groupedExpenses).map(([dateGroup, groupExpenses]) => (
+                    <div key={dateGroup} className="mb-4">
+                      <div className={`sticky top-0 py-2 backdrop-blur-md z-10 ${isDarkMode ? 'bg-black/60' : 'bg-slate-50/90'}`}>
+                        <h3 className={`text-[11px] font-bold uppercase tracking-widest m-0 pl-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{dateGroup}</h3>
                       </div>
-                    );
-                  })}
+                      <div className="space-y-2 mt-1">
+                        {groupExpenses.map((exp, i) => renderExpenseItem(exp, i))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Tab 2: Commitments / Recurrings View */}
+          {currentTab === 'recurrings' && (() => {
+            const weeklyItems = expenses.filter(exp => exp.scopeType === 'weekly');
+            const monthlyItems = expenses.filter(exp => exp.scopeType === 'monthly');
+            const weeklyTotal = weeklyItems.reduce((acc, curr) => acc + curr.amount, 0);
+            const monthlyTotal = monthlyItems.reduce((acc, curr) => acc + curr.amount, 0);
+            
+            return (
+              <div className={`flex-1 flex flex-col p-6 space-y-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
+                {/* Commitment Cards */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className={`p-4 rounded-3xl border flex flex-col justify-between h-32 relative overflow-hidden transition-all hover:shadow-md ${isDarkMode ? 'bg-slate-900/50 border-amber-500/10' : 'bg-amber-50/20 border-amber-200'}`}>
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-amber-500/5 rounded-full blur-xl translate-x-4 -translate-y-4"></div>
+                    <div className="flex items-center gap-2">
+                      <span className={`material-symbols-outlined text-[20px] ${isDarkMode ? 'text-amber-400' : 'text-amber-600'}`}>date_range</span>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Weekly</span>
+                    </div>
+                    <div className="mt-2">
+                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(weeklyTotal)}</span>
+                      <p className={`text-[10px] m-0 mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{weeklyItems.length} recurring items</p>
+                    </div>
+                  </div>
+
+                  <div className={`p-4 rounded-3xl border flex flex-col justify-between h-32 relative overflow-hidden transition-all hover:shadow-md ${isDarkMode ? 'bg-slate-900/50 border-purple-500/10' : 'bg-purple-50/20 border-purple-200'}`}>
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/5 rounded-full blur-xl translate-x-4 -translate-y-4"></div>
+                    <div className="flex items-center gap-2">
+                      <span className={`material-symbols-outlined text-[20px] ${isDarkMode ? 'text-purple-400' : 'text-purple-600'}`}>calendar_month</span>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Monthly</span>
+                    </div>
+                    <div className="mt-2">
+                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(monthlyTotal)}</span>
+                      <p className={`text-[10px] m-0 mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{monthlyItems.length} recurring items</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Weekly Commitments List */}
+                <div className="flex flex-col gap-2">
+                  <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Weekly Commitments</h3>
+                  {weeklyItems.length === 0 ? (
+                    <div className={`text-center py-6 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                      No weekly commitments found.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {weeklyItems.map((exp, i) => renderExpenseItem(exp, i))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Monthly Commitments List */}
+                <div className="flex flex-col gap-2 pt-2">
+                  <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Monthly Commitments</h3>
+                  {monthlyItems.length === 0 ? (
+                    <div className={`text-center py-6 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                      No monthly commitments found.
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {monthlyItems.map((exp, i) => renderExpenseItem(exp, i))}
+                    </div>
+                  )}
                 </div>
               </div>
-            ))
-          )}
-          </div>
+            );
+          })()}
+
+          {/* Tab 3: Projects Tracker View */}
+          {currentTab === 'projects' && (() => {
+            if (selectedProjectDetailId) {
+              const project = projects.find(p => p.id === selectedProjectDetailId);
+              if (!project) {
+                setSelectedProjectDetailId(null);
+                return null;
+              }
+              
+              const projectExpenses = expenses.filter(exp => exp.projectId === selectedProjectDetailId);
+              const projectTotal = projectExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+              
+              return (
+                <div className={`flex-1 flex flex-col p-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
+                  {/* Detail Header */}
+                  <div className="flex items-center justify-between mb-6">
+                    <button
+                      onClick={() => setSelectedProjectDetailId(null)}
+                      className={`flex items-center gap-1 text-xs font-bold border-0 bg-transparent cursor-pointer transition-colors outline-none
+                                 ${isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-500'}`}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+                      Back to Projects
+                    </button>
+                    <button
+                      onClick={() => handleDeleteProject(project.id)}
+                      className={`flex items-center gap-1 text-xs font-bold border-0 bg-transparent cursor-pointer transition-colors outline-none
+                                 ${isDarkMode ? 'text-red-400 hover:text-red-300' : 'text-red-600 hover:text-red-500'}`}
+                    >
+                      <span className="material-symbols-outlined text-[16px]">delete</span>
+                      Delete Project
+                    </button>
+                  </div>
+
+                  {/* Summary Card */}
+                  <div className={`p-5 rounded-3xl border flex flex-col justify-between mb-6 relative overflow-hidden transition-all ${isDarkMode ? 'bg-slate-900/50 border-cyan-500/10' : 'bg-cyan-50/20 border-cyan-200'}`}>
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-xl translate-x-4 -translate-y-4"></div>
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="material-symbols-outlined text-[20px] text-cyan-500 animate-pulse">folder</span>
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Project Cost</span>
+                      </div>
+                      <h2 className={`text-xl font-bold tracking-tight m-0 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{project.name}</h2>
+                    </div>
+                    <div className="mt-4 pt-4 border-t border-slate-500/10 flex items-end justify-between">
+                      <span className={`text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Accumulated Expense</span>
+                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(projectTotal)}</span>
+                    </div>
+                  </div>
+
+                  {/* Expenses List */}
+                  <div className="flex flex-col gap-2">
+                    <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Expenses in Project</h3>
+                    {projectExpenses.length === 0 ? (
+                      <div className={`text-center py-10 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                        No expenses logged for this project yet. Use the '+' button below to add!
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {projectExpenses.map((exp, i) => renderExpenseItem(exp, i))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+            
+            // Otherwise, render list of projects
+            return (
+              <div className={`flex-1 flex flex-col p-6 space-y-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
+                
+                {/* Project Creator Card */}
+                <div className={`p-4 rounded-3xl border flex flex-col gap-3 transition-all ${isDarkMode ? 'bg-slate-900/30 border-slate-800' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                  <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 m-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Create New Project</h3>
+                  <div className="flex gap-2">
+                    <div className={`flex-1 flex items-center gap-2 px-4 py-2.5 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500' : 'bg-slate-50 border-slate-200 focus-within:border-blue-400'}`}>
+                      <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>create_new_folder</span>
+                      <input 
+                        type="text" 
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        placeholder="Project Name (e.g. Prototype Cost)"
+                        className={`w-full bg-transparent border-none outline-none text-sm p-0 ${isDarkMode ? 'text-slate-200 placeholder-slate-600' : 'text-slate-700 placeholder-slate-400'}`}
+                      />
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (newProjectName.trim()) {
+                          const newProj = {
+                            id: 'proj_' + Date.now(),
+                            name: newProjectName.trim()
+                          };
+                          setProjects(prev => [...prev, newProj]);
+                          setNewProjectName('');
+                        }
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs px-4 py-2.5 border-0 cursor-pointer font-bold transition-all active:scale-[0.98]"
+                    >
+                      Create
+                    </button>
+                  </div>
+                </div>
+
+                {/* Projects Grid */}
+                <div className="flex flex-col gap-2">
+                  <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Active Projects</h3>
+                  
+                  {projects.length === 0 ? (
+                    <div className={`text-center py-10 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                      No custom projects found. Create one above to track project costs!
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-3">
+                      {projects.map(proj => {
+                        const projExpenses = expenses.filter(exp => exp.projectId === proj.id);
+                        const projTotal = projExpenses.reduce((acc, curr) => acc + curr.amount, 0);
+                        
+                        return (
+                          <div
+                            key={proj.id}
+                            onClick={() => setSelectedProjectDetailId(proj.id)}
+                            className={`p-4 rounded-2xl border flex items-center justify-between cursor-pointer group transition-all hover:-translate-y-0.5 active:scale-[0.99]
+                                       ${isDarkMode 
+                                         ? 'bg-slate-800/30 border-slate-700/50 hover:bg-slate-800 hover:border-slate-600' 
+                                         : 'bg-white border-slate-200/60 shadow-sm hover:shadow-md hover:border-slate-300'}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${isDarkMode ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-cyan-50 border-cyan-200 text-cyan-600'}`}>
+                                <span className="material-symbols-outlined text-[20px]">folder</span>
+                              </div>
+                              <div className="flex flex-col">
+                                <span className={`text-[15px] font-semibold transition-colors group-hover:text-blue-500 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{proj.name}</span>
+                                <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{projExpenses.length} expenses</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className={`text-base font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{formatCurrency(projTotal)}</span>
+                              <span className={`material-symbols-outlined text-slate-400 transition-transform group-hover:translate-x-0.5`}>chevron_right</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            );
+          })()}
         </div>
-      </div>
       
-      {/* Floating Action Button */}
       <button 
-        onClick={() => { setEditingId(null); setIsBottomSheetOpen(true); }}
+        onClick={handleOpenNewBottomSheet}
         className={`fixed bottom-8 right-8 md:bottom-12 md:right-[calc(50vw-200px)] w-14 h-14 rounded-full shadow-lg hover:shadow-xl hover:-translate-y-1 active:scale-95 transition-all flex items-center justify-center z-40 border-0 cursor-pointer ${isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}`}
       >
         <span className="material-symbols-outlined text-3xl">add</span>
@@ -925,6 +1267,96 @@ export default function App() {
                   })}
                 </div>
               </div>
+
+              {/* Scope Selector */}
+              <div className="w-full flex flex-col gap-2">
+                <span className={`text-[10px] font-bold uppercase tracking-wider pl-1 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Scope & Recurrings</span>
+                <div className={`grid grid-cols-4 gap-1 p-1 rounded-2xl border ${isDarkMode ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-100/80 border-slate-200'}`}>
+                  {(['one-off', 'weekly', 'monthly', 'project'] as const).map(type => {
+                    const isSelected = scopeType === type;
+                    const labels = { 'one-off': 'One-off', 'weekly': 'Weekly', 'monthly': 'Monthly', 'project': 'Project' };
+                    const icons = { 'one-off': 'payments', 'weekly': 'date_range', 'monthly': 'calendar_month', 'project': 'folder' };
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => {
+                          setScopeType(type);
+                          if (type === 'project' && projects.length > 0 && !selectedProjectId) {
+                            setSelectedProjectId(projects[0].id);
+                          }
+                        }}
+                        className={`flex flex-col items-center gap-1 py-2 rounded-xl text-[10px] font-bold transition-all border-0 outline-none cursor-pointer
+                                  ${isSelected 
+                                    ? (isDarkMode ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm') 
+                                    : (isDarkMode ? 'text-slate-500 hover:text-slate-400' : 'text-slate-500 hover:text-slate-600')}`}
+                      >
+                        <span className="material-symbols-outlined text-[18px]">{icons[type]}</span>
+                        {labels[type]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Project Selection Row (Visible only if project scope selected) */}
+              {scopeType === 'project' && (
+                <div className="w-full flex flex-col gap-2 animate-in slide-in-from-top-2 duration-200">
+                  <div className="flex items-center justify-between pl-1">
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Select Project</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingNewProject(!isCreatingNewProject)}
+                      className={`text-[10px] font-bold border-0 bg-transparent cursor-pointer flex items-center gap-1 outline-none transition-colors ${isDarkMode ? 'text-blue-400 hover:text-blue-300' : 'text-blue-600 hover:text-blue-500'}`}
+                    >
+                      <span className="material-symbols-outlined text-[12px]">{isCreatingNewProject ? 'list' : 'add'}</span>
+                      {isCreatingNewProject ? 'Choose Existing' : 'Create New'}
+                    </button>
+                  </div>
+
+                  {isCreatingNewProject ? (
+                    <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500 focus-within:bg-slate-800' : 'bg-white/60 border-slate-200 focus-within:border-blue-400 focus-within:bg-white'}`}>
+                      <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>create_new_folder</span>
+                      <input 
+                        type="text" 
+                        value={newProjectName}
+                        onChange={(e) => setNewProjectName(e.target.value)}
+                        placeholder="Project Name (e.g. Prototype Cost)"
+                        className={`w-full bg-transparent border-none outline-none text-sm p-0 ${isDarkMode ? 'text-slate-200 placeholder-slate-600' : 'text-slate-700 placeholder-slate-400'}`}
+                        autoFocus
+                      />
+                    </div>
+                  ) : (
+                    <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500 focus-within:bg-slate-800' : 'bg-white/60 border-slate-200 focus-within:border-blue-400 focus-within:bg-white'}`}>
+                      <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>folder</span>
+                      {projects.length === 0 ? (
+                        <div className="flex-1 flex items-center justify-between">
+                          <span className={`text-sm ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>No projects. Create one first!</span>
+                          <button
+                            type="button"
+                            onClick={() => setIsCreatingNewProject(true)}
+                            className="bg-blue-600 text-white rounded-lg text-xs px-2.5 py-1 border-0 cursor-pointer font-bold"
+                          >
+                            Create
+                          </button>
+                        </div>
+                      ) : (
+                        <select
+                          value={selectedProjectId}
+                          onChange={(e) => setSelectedProjectId(e.target.value)}
+                          className={`w-full bg-transparent border-none outline-none text-sm p-0 font-medium ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}
+                        >
+                          {projects.map(p => (
+                            <option key={p.id} value={p.id} className={isDarkMode ? 'bg-slate-900 text-slate-200' : 'bg-white text-slate-800'}>
+                              {p.name}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Note Input */}
               <div className="w-full">
