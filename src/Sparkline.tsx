@@ -1,11 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, memo } from 'react';
 
 interface SparklineProps {
   expenses: { amount: number; date: string }[];
   isDarkMode: boolean;
 }
 
-export default function Sparkline({ expenses, isDarkMode }: SparklineProps) {
+const Sparkline = memo(function Sparkline({ expenses, isDarkMode }: SparklineProps) {
   const dataPoints = useMemo(() => {
     if (!expenses || expenses.length === 0) return { pathString: '', values: [] };
     
@@ -80,4 +80,6 @@ export default function Sparkline({ expenses, isDarkMode }: SparklineProps) {
       </svg>
     </div>
   );
-}
+});
+
+export default Sparkline;

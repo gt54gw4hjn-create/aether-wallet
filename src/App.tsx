@@ -1,34 +1,8 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import DonutChart from './Chart';
-import Sparkline from './Sparkline';
-import { saveReceipt, getReceipt, deleteReceipt } from './db';
+import { useState, useEffect, useRef } from 'react';
+import { saveReceipt, getReceipt, deleteReceipt, getAllReceipts, restoreReceipts } from './db';
+import Dashboard from './components/Dashboard';
 
-// Define Categories with Apple-style Colors
-const CATEGORIES = [
-  { id: 'food', label: 'Food', icon: 'restaurant', emoji: '🍔', color: '#ff9500' }, 
-  { id: 'coffee', label: 'Coffee', icon: 'local_cafe', emoji: '☕', color: '#a2845e' }, 
-  { id: 'transport', label: 'Transit', icon: 'directions_car', emoji: '🚗', color: '#34c759' }, 
-  { id: 'shopping', label: 'Shopping', icon: 'shopping_bag', emoji: '🛍️', color: '#007aff' }, 
-  { id: 'entertainment', label: 'Fun', icon: 'sports_esports', emoji: '🎮', color: '#af52de' }, 
-  { id: 'other', label: 'Other', icon: 'more_horiz', emoji: '✨', color: '#8e8e93' }, 
-];
-
-interface Project {
-  id: string;
-  name: string;
-}
-
-interface Expense {
-  id: string;
-  title: string;
-  amount: number;
-  date: string;
-  time?: string;
-  categoryId: string;
-  hasReceipt?: boolean;
-  scopeType?: 'one-off' | 'weekly' | 'monthly' | 'project';
-  projectId?: string;
-}
+import { CATEGORIES, type Expense, type Project, type QuickTemplate } from './types';
 
 // Formatter for currency
 const formatCurrency = (amount: number) => {
@@ -46,6 +20,84 @@ const formatTime12h = (time24?: string) => {
   hours = hours ? hours : 12; // the hour '0' should be '12'
   return `${hours}:${minutesStr} ${ampm}`;
 };
+
+interface ConfettiParticle {
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  speedX: number;
+  speedY: number;
+  rotation: number;
+  rotationSpeed: number;
+}
+
+const playHaptic = (type: 'click' | 'success' | 'delete' | 'warning') => {
+  if (localStorage.getItem('micro_sound_enabled') === 'false') return;
+  try {
+    const AudioContextClass = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const ctx = new AudioContextClass();
+    
+    if (type === 'click') {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      gain.gain.setValueAtTime(0.05, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.05);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.05);
+    }
+    else if (type === 'success') {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(1000, now + 0.1);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(now + 0.25);
+    }
+    else if (type === 'delete') {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(180, now);
+      osc.frequency.linearRampToValueAtTime(100, now + 0.15);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(now + 0.15);
+    }
+    else if (type === 'warning') {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, now);
+      gain.gain.setValueAtTime(0.08, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(now + 0.3);
+    }
+  } catch (e) {
+    console.error("Audio Context failed to play", e);
+  }
+};
+
+const getRandom = () => Math.random();
+const getNow = () => Date.now();
 
 export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>(() => {
@@ -77,19 +129,76 @@ export default function App() {
     const saved = localStorage.getItem('micro_budget');
     return saved ? parseFloat(saved) : 3000;
   });
-  const [isEditingBudget, setIsEditingBudget] = useState(false);
-  const [editBudgetVal, setEditBudgetVal] = useState('');
 
-  const [filterCategory, setFilterCategory] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
   
   // AI Scanner State
   const [isScanning, setIsScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const confettiCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  const longPressTimeout = useRef<number | null>(null);
 
   // Bottom Sheet State
   const [isBottomSheetOpen, setIsBottomSheetOpen] = useState(false);
+
+  const triggerConfetti = () => {
+    if (localStorage.getItem('micro_confetti_enabled') === 'false') return;
+    const canvas = confettiCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    canvas.width = canvas.parentElement?.clientWidth || window.innerWidth;
+    canvas.height = canvas.parentElement?.clientHeight || window.innerHeight;
+    
+    const colors = ['#ff9500', '#a2845e', '#34c759', '#007aff', '#af52de', '#ff2d55', '#6366f1'];
+    const particles: ConfettiParticle[] = [];
+    
+    for (let i = 0; i < 80; i++) {
+      particles.push({
+        x: canvas.width / 2,
+        y: canvas.height - 20,
+        size: getRandom() * 6 + 4,
+        color: colors[Math.floor(getRandom() * colors.length)],
+        speedX: (getRandom() - 0.5) * 12,
+        speedY: -getRandom() * 12 - 8,
+        rotation: getRandom() * Math.PI * 2,
+        rotationSpeed: (getRandom() - 0.5) * 0.2
+      });
+    }
+    
+    const update = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      let active = false;
+      particles.forEach(p => {
+        p.x += p.speedX;
+        p.y += p.speedY;
+        p.speedY += 0.3; // gravity
+        p.speedX *= 0.98; // friction
+        p.rotation += p.rotationSpeed;
+        
+        if (p.y < canvas.height + 20) {
+          active = true;
+          ctx.save();
+          ctx.translate(p.x, p.y);
+          ctx.rotate(p.rotation);
+          ctx.fillStyle = p.color;
+          ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+          ctx.restore();
+        }
+      });
+      
+      if (active) {
+        requestAnimationFrame(update);
+      } else {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    };
+    
+    update();
+  };
 
   // V5 Custom States for Scope and Projects
   const [projects, setProjects] = useState<Project[]>(() => {
@@ -103,6 +212,48 @@ export default function App() {
   const [isCreatingNewProject, setIsCreatingNewProject] = useState<boolean>(false);
   const [selectedProjectDetailId, setSelectedProjectDetailId] = useState<string | null>(null);
 
+  // V6 Custom States for Budgets & Portability
+  const [categoryBudgets, setCategoryBudgets] = useState<Record<string, number>>(() => {
+    const saved = localStorage.getItem('micro_category_budgets');
+    return saved ? JSON.parse(saved) : {};
+  });
+  const [isBudgetSheetOpen, setIsBudgetSheetOpen] = useState(false);
+  const [newProjectBudget, setNewProjectBudget] = useState<string>('');
+  const restoreFileInputRef = useRef<HTMLInputElement>(null);
+
+  // V7: Quick Templates, Bulk Mode, and Insights toggles
+  const [quickTemplates, setQuickTemplates] = useState<QuickTemplate[]>(() => {
+    const saved = localStorage.getItem('micro_templates');
+    if (saved) return JSON.parse(saved);
+    return [
+      { id: 't1', emoji: '☕', title: 'Coffee', amount: 12, categoryId: 'coffee' },
+      { id: 't2', emoji: '🚗', title: 'Transit', amount: 20, categoryId: 'transport' },
+      { id: 't3', emoji: '🍔', title: 'Lunch', amount: 15, categoryId: 'food' },
+      { id: 't4', emoji: '🛍️', title: 'Shopping', amount: 50, categoryId: 'shopping' },
+    ];
+  });
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState<string[]>([]);
+  const [isBatchCategoryOpen, setIsBatchCategoryOpen] = useState(false);
+  const [selectedCalendarDateIndex, setSelectedCalendarDateIndex] = useState<number | null>(null);
+
+
+  // V6 Audio & Confetti Toggle States
+  const [soundEnabled, setSoundEnabled] = useState(() => {
+    return localStorage.getItem('micro_sound_enabled') !== 'false';
+  });
+  const [confettiEnabled, setConfettiEnabled] = useState(() => {
+    return localStorage.getItem('micro_confetti_enabled') !== 'false';
+  });
+
+  // V6 Crop Editor States
+  const [rawImageToCrop, setRawImageToCrop] = useState<string | null>(null);
+  const [isCropEditorOpen, setIsCropEditorOpen] = useState(false);
+  const [cropTop, setCropTop] = useState(5);
+  const [cropBottom, setCropBottom] = useState(5);
+  const [cropLeft, setCropLeft] = useState(5);
+  const [cropRight, setCropRight] = useState(5);
+
   // V4 Custom States for Receipts and Swiping
   const [scannedImage, setScannedImage] = useState<string | null>(null);
   const [lightboxReceipt, setLightboxReceipt] = useState<{ url: string; title: string; id: string } | null>(null);
@@ -111,10 +262,23 @@ export default function App() {
   const touchStartX = useRef<number>(0);
   const touchStartY = useRef<number>(0);
   const isSwiping = useRef<boolean>(false);
+  const [isSwipingState, setIsSwipingState] = useState(false);
 
   useEffect(() => localStorage.setItem('micro_expenses', JSON.stringify(expenses)), [expenses]);
   useEffect(() => localStorage.setItem('micro_projects', JSON.stringify(projects)), [projects]);
   useEffect(() => localStorage.setItem('micro_budget', budgetLimit.toString()), [budgetLimit]);
+  useEffect(() => {
+    localStorage.setItem('micro_category_budgets', JSON.stringify(categoryBudgets));
+  }, [categoryBudgets]);
+  useEffect(() => {
+    localStorage.setItem('micro_sound_enabled', soundEnabled ? 'true' : 'false');
+  }, [soundEnabled]);
+  useEffect(() => {
+    localStorage.setItem('micro_confetti_enabled', confettiEnabled ? 'true' : 'false');
+  }, [confettiEnabled]);
+  useEffect(() => {
+    localStorage.setItem('micro_templates', JSON.stringify(quickTemplates));
+  }, [quickTemplates]);
   useEffect(() => {
     localStorage.setItem('micro_theme', isDarkMode ? 'dark' : 'light');
     if (isDarkMode) {
@@ -124,15 +288,10 @@ export default function App() {
     }
   }, [isDarkMode]);
 
+
+
   // AI Image Scanning Logic (OpenAI)
-  const handleImageScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Reset input so same file can be chosen again
-    if (fileInputRef.current) fileInputRef.current.value = '';
-
-    // Load key from .env
+  const processAndScanImage = async (croppedUrl: string) => {
     const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
     if (!apiKey) {
       alert("Error: OpenAI API Key not found in .env file.");
@@ -140,53 +299,75 @@ export default function App() {
     }
 
     setIsScanning(true);
+    setIsCropEditorOpen(false);
 
     try {
-      // Compress Image using Canvas before sending to AI
-      const compressedDataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (event) => {
-          const img = new Image();
-          img.src = event.target?.result as string;
-          img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const MAX_WIDTH = 1024;
-            const MAX_HEIGHT = 1024;
-            let width = img.width;
-            let height = img.height;
+      // 1. Keep the color cropped image for the user to review and save in IndexedDB
+      setScannedImage(croppedUrl);
 
-            // Maintain aspect ratio
-            if (width > height) {
-              if (width > MAX_WIDTH) {
-                height *= MAX_WIDTH / width;
-                width = MAX_WIDTH;
-              }
-            } else {
-              if (height > MAX_HEIGHT) {
-                width *= MAX_HEIGHT / height;
-                height = MAX_HEIGHT;
-              }
+      // 2. Generate a processed grayscale/high-contrast image strictly for OpenAI Vision API (to optimize token usage and accuracy)
+      const processedDataUrl = await new Promise<string>((resolve, reject) => {
+        const img = new Image();
+        img.src = croppedUrl;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 768;
+          const MAX_HEIGHT = 768;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
             }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
 
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            ctx?.drawImage(img, 0, 0, width, height);
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error("Canvas context is null"));
+            return;
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Local grayscale & contrast enhancement for better AI read
+          const imgData = ctx.getImageData(0, 0, width, height);
+          const data = imgData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
             
-            // Get compressed JPEG at 70% quality
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-            resolve(dataUrl); // return full data URL
-          };
-          img.onerror = (err) => reject(err);
+            let val: number;
+            if (gray < 120) {
+              val = Math.max(0, gray - 25);
+            } else {
+              val = Math.min(255, gray + 25);
+            }
+            
+            data[i] = val;
+            data[i + 1] = val;
+            data[i + 2] = val;
+          }
+          ctx.putImageData(imgData, 0, 0);
+
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+          resolve(dataUrl);
         };
-        reader.onerror = (err) => reject(err);
+        img.onerror = (err) => reject(err);
       });
 
-      setScannedImage(compressedDataUrl);
-      const base64Data = compressedDataUrl.split(',')[1];
+      const base64Data = processedDataUrl.split(',')[1];
 
-      // Fetch to OpenAI API
       const response = await fetch(`https://api.openai.com/v1/chat/completions`, {
         method: 'POST',
         headers: { 
@@ -201,23 +382,24 @@ export default function App() {
               content: [
                 {
                   type: "text",
-                  text: "Analyze this receipt. Return ONLY a valid JSON object with these exact keys:\n1. 'amount' (number, the final total price, NO currency symbols or commas).\n2. 'title' (string, the merchant name AND a concise list of main items purchased, e.g. \"Walmart - Milk, Bread, Apples\"). This is crucial for later searching.\n3. 'date' (string, YYYY-MM-DD. If missing, omit the key).\n4. 'time' (string, HH:MM format in 24-hour clock. If missing, omit the key).\n5. 'category' (string, choose exactly one from: 'food', 'coffee', 'transport', 'shopping', 'entertainment', 'other').\nIf the image is not a receipt or is completely unreadable, return {\"error\": \"Unreadable receipt\"}.\nDo not use markdown code blocks like ```json."
+                  text: "Extract receipt data. Return ONLY JSON: {amount: number, title: string (Merchant - items), date: 'YYYY-MM-DD', time: 'HH:MM' (24h), category: 'food'|'coffee'|'transport'|'shopping'|'entertainment'|'other'}. If invalid, return {error: 'invalid'}. No markdown code blocks."
                 },
                 {
                   type: "image_url",
                   image_url: {
-                    url: `data:image/jpeg;base64,${base64Data}`
+                    url: `data:image/jpeg;base64,${base64Data}`,
+                    detail: "low"
                   }
                 }
               ]
             }
           ],
-          temperature: 0.1
+          temperature: 0.1,
+          max_tokens: 150
         })
       });
 
       const data = await response.json();
-      
       if (data.error) {
         throw new Error(data.error.message || 'API Error');
       }
@@ -225,7 +407,6 @@ export default function App() {
       const text = data.choices?.[0]?.message?.content;
       if (!text) throw new Error("No text returned from AI");
 
-      // Parse JSON from AI text
       const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
       const parsed = JSON.parse(cleanText);
 
@@ -233,7 +414,6 @@ export default function App() {
         throw new Error(parsed.error);
       }
 
-      // Populate Form
       if (parsed.amount) setAmountInput(parsed.amount.toString());
       if (parsed.title) setTitleInput(parsed.title);
       if (parsed.date) setDateInput(parsed.date);
@@ -243,15 +423,36 @@ export default function App() {
         if (cat) setSelectedCategory(cat.id);
       }
 
-    } catch (err: any) {
-      alert("Failed to scan receipt: " + err.message);
-      setScannedImage(null);
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      alert("Failed to auto-scan receipt values. You can still manually enter the details. (" + errorMessage + ")");
     } finally {
       setIsScanning(false);
     }
   };
 
+  const handleImageScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    playHaptic('click');
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      setRawImageToCrop(event.target?.result as string);
+      setCropTop(5);
+      setCropBottom(5);
+      setCropLeft(5);
+      setCropRight(5);
+      setIsCropEditorOpen(true);
+    };
+  };
+
   const handleOpenNewBottomSheet = () => {
+    playHaptic('click');
     setEditingId(null);
     setAmountInput('');
     setTitleInput('');
@@ -279,7 +480,7 @@ export default function App() {
     const [year, month, day] = dateInput.split('-');
     const formattedDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day)).toLocaleDateString();
 
-    let updatedExpensesList = [...expenses];
+    let updatedExpensesList: Expense[];
 
     const finalTime = timeInput.trim() || (() => {
       const now = new Date();
@@ -289,7 +490,7 @@ export default function App() {
     let finalProjId: string | undefined = undefined;
     if (scopeType === 'project') {
       if (isCreatingNewProject && newProjectName.trim()) {
-        const newProjId = 'proj_' + Date.now();
+        const newProjId = 'proj_' + getNow();
         const newProj = { id: newProjId, name: newProjectName.trim() };
         setProjects(prev => [...prev, newProj]);
         finalProjId = newProjId;
@@ -318,7 +519,7 @@ export default function App() {
       }
       setEditingId(null);
     } else {
-      const newId = Date.now().toString();
+      const newId = getNow().toString();
       const newExpense: Expense = {
         id: newId,
         title: finalTitle,
@@ -338,6 +539,16 @@ export default function App() {
     }
 
     setExpenses(updatedExpensesList);
+    
+    // Play haptic feedback and trigger confetti
+    const newTotal = updatedExpensesList.reduce((sum, exp) => sum + exp.amount, 0);
+    if (newTotal >= budgetLimit) {
+      playHaptic('warning');
+    } else {
+      playHaptic('success');
+      triggerConfetti();
+    }
+
     setAmountInput('');
     setTitleInput('');
     setDateInput(new Date().toISOString().split('T')[0]);
@@ -353,6 +564,7 @@ export default function App() {
   };
 
   const handleEditClick = (exp: Expense) => {
+    playHaptic('click');
     setEditingId(exp.id);
     setAmountInput(exp.amount.toString());
     setTitleInput(exp.title);
@@ -385,10 +597,11 @@ export default function App() {
     setIsBottomSheetOpen(true);
   };
 
-  const handleDeleteExpense = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDeleteExpense = async (id: string, e?: React.SyntheticEvent) => {
+    e?.stopPropagation();
     setExpenses(expenses.filter(exp => exp.id !== id));
     await deleteReceipt(id);
+    playHaptic('delete');
     if (editingId === id) {
       setEditingId(null);
       setAmountInput('');
@@ -412,66 +625,141 @@ export default function App() {
     }
   };
 
+  const handleBatchDelete = async () => {
+    if (selectedExpenseIds.length === 0) return;
+    if (!confirm(`Are you sure you want to delete these ${selectedExpenseIds.length} items?`)) return;
+    
+    playHaptic('delete');
+    const idsToDelete = [...selectedExpenseIds];
+    setExpenses(prev => prev.filter(exp => !idsToDelete.includes(exp.id)));
+    
+    for (const id of idsToDelete) {
+      await deleteReceipt(id);
+    }
+    
+    setSelectedExpenseIds([]);
+    setIsBulkMode(false);
+  };
+
+  const handleBatchChangeCategory = (catId: string) => {
+    if (selectedExpenseIds.length === 0) return;
+    playHaptic('success');
+    
+    setExpenses(prev => prev.map(exp => 
+      selectedExpenseIds.includes(exp.id) 
+        ? { ...exp, categoryId: catId } 
+        : exp
+    ));
+    
+    setSelectedExpenseIds([]);
+    setIsBulkMode(false);
+    setIsBatchCategoryOpen(false);
+  };
+
   const renderExpenseItem = (exp: Expense, index: number) => {
     const category = CATEGORIES.find(c => c.id === exp.categoryId) || CATEGORIES[5];
     const isEditingThis = editingId === exp.id;
     const isSwiped = swipeActiveId === exp.id;
-    const translateStyle = isSwiped ? `translateX(${swipeDistance}px)` : 'translateX(0)';
-    const transitionStyle = isSwiped && isSwiping.current ? 'none' : 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
+    const translateStyle = !isBulkMode && isSwiped ? `translateX(${swipeDistance}px)` : 'translateX(0)';
+    const transitionStyle = !isBulkMode && isSwiped && isSwipingState ? 'none' : 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1)';
     
+    const isSelected = selectedExpenseIds.includes(exp.id);
+    const handleToggleSelect = () => {
+      playHaptic('click');
+      if (isSelected) {
+        setSelectedExpenseIds(prev => prev.filter(id => id !== exp.id));
+      } else {
+        setSelectedExpenseIds(prev => [...prev, exp.id]);
+      }
+    };
+
+    const startLongPress = () => {
+      if (isBulkMode) return;
+      longPressTimeout.current = window.setTimeout(() => {
+        playHaptic('success');
+        setIsBulkMode(true);
+        setSelectedExpenseIds([exp.id]);
+      }, 600);
+    };
+
+    const cancelLongPress = () => {
+      if (longPressTimeout.current) {
+        clearTimeout(longPressTimeout.current);
+        longPressTimeout.current = null;
+      }
+    };
+
     return (
       <div 
         key={exp.id}
         className="relative overflow-hidden rounded-2xl w-full select-none"
       >
-        {/* Swipe Action Background Layer */}
-        <div className="absolute inset-0 flex items-center justify-between z-0 rounded-2xl">
-          {/* Left Swipe Action (Edit) */}
-          <div 
-            onClick={() => {
-              handleEditClick(exp);
-              setSwipeActiveId(null);
-              setSwipeDistance(0);
-            }}
-            className="h-full bg-indigo-600 text-white px-5 flex items-center justify-start rounded-l-2xl cursor-pointer w-20 transition-opacity"
-            style={{ opacity: swipeDistance > 0 ? 1 : 0 }}
-          >
-            <span className="material-symbols-outlined text-white text-[20px]">edit</span>
+        {/* Swipe Action Background Layer (Disabled in Bulk Mode) */}
+        {!isBulkMode && (
+          <div className="absolute inset-0 flex items-center justify-between z-0 rounded-2xl">
+            {/* Left Swipe Action (Edit) */}
+            <div 
+              onClick={() => {
+                handleEditClick(exp);
+                setSwipeActiveId(null);
+                setSwipeDistance(0);
+              }}
+              className="h-full bg-indigo-600 text-white px-5 flex items-center justify-start rounded-l-2xl cursor-pointer w-20 transition-opacity"
+              style={{ opacity: swipeDistance > 0 ? 1 : 0 }}
+            >
+              <span className="material-symbols-outlined text-white text-[20px]">edit</span>
+            </div>
+            
+            {/* Right Swipe Action (Delete) */}
+            <div 
+              onClick={(e) => {
+                handleDeleteExpense(exp.id, e);
+                setSwipeActiveId(null);
+                setSwipeDistance(0);
+              }}
+              className="h-full bg-red-600 text-white px-5 flex items-center justify-end rounded-r-2xl cursor-pointer w-20 ml-auto transition-opacity"
+              style={{ opacity: swipeDistance < 0 ? 1 : 0 }}
+            >
+              <span className="material-symbols-outlined text-white text-[20px]">delete</span>
+            </div>
           </div>
-          
-          {/* Right Swipe Action (Delete) */}
-          <div 
-            onClick={(e) => {
-              handleDeleteExpense(exp.id, e);
-              setSwipeActiveId(null);
-              setSwipeDistance(0);
-            }}
-            className="h-full bg-red-600 text-white px-5 flex items-center justify-end rounded-r-2xl cursor-pointer w-20 ml-auto transition-opacity"
-            style={{ opacity: swipeDistance < 0 ? 1 : 0 }}
-          >
-            <span className="material-symbols-outlined text-white text-[20px]">delete</span>
-          </div>
-        </div>
+        )}
 
         {/* Foreground Card */}
         <div 
           onClick={() => {
-            if (isSwiped && Math.abs(swipeDistance) > 10) {
+            if (isBulkMode) {
+              handleToggleSelect();
+            } else if (isSwiped && Math.abs(swipeDistance) > 10) {
               setSwipeActiveId(null);
               setSwipeDistance(0);
             } else {
               handleEditClick(exp);
             }
           }}
-          onTouchStart={(e) => handleTouchStart(e, exp.id)}
-          onTouchMove={(e) => handleTouchMove(e, exp.id)}
-          onTouchEnd={() => handleTouchEnd()}
+          onTouchStart={(e) => {
+            startLongPress();
+            if (!isBulkMode) handleTouchStart(e, exp.id);
+          }}
+          onTouchMove={(e) => {
+            cancelLongPress();
+            if (!isBulkMode) handleTouchMove(e, exp.id);
+          }}
+          onTouchEnd={() => {
+            cancelLongPress();
+            if (!isBulkMode) handleTouchEnd();
+          }}
+          onMouseDown={startLongPress}
+          onMouseUp={cancelLongPress}
+          onMouseLeave={cancelLongPress}
           className={`relative z-10 flex items-center justify-between p-3.5 rounded-2xl border cursor-pointer animate-in fade-in slide-in-from-bottom-2
                      ${isEditingThis 
                        ? (isDarkMode ? 'bg-slate-800 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.3)]' : 'bg-blue-50 border-blue-200 shadow-md')
-                       : (isDarkMode 
-                           ? 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800' 
-                           : 'bg-white border-slate-200/60 shadow-sm hover:shadow-md')}`}
+                       : (isBulkMode && isSelected
+                           ? (isDarkMode ? 'bg-indigo-950/40 border-indigo-500/50' : 'bg-indigo-50/50 border-indigo-300 shadow-sm')
+                           : (isDarkMode 
+                               ? 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800' 
+                               : 'bg-white border-slate-200/60 shadow-sm hover:shadow-md'))}`}
           style={{ 
             transform: translateStyle, 
             transition: transitionStyle,
@@ -480,6 +768,16 @@ export default function App() {
           }}
         >
           <div className="flex items-center gap-3.5">
+            {/* V7 Checkbox Circle (Bulk Mode) */}
+            {isBulkMode && (
+              <span className={`material-symbols-outlined text-[20px] shrink-0 mr-0.5 transition-colors
+                               ${isSelected 
+                                 ? 'text-indigo-500 font-bold' 
+                                 : (isDarkMode ? 'text-slate-600' : 'text-slate-300')}`}>
+                {isSelected ? 'check_circle' : 'circle'}
+              </span>
+            )}
+            
             <div 
               className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 transition-colors"
               style={{ 
@@ -498,7 +796,11 @@ export default function App() {
                   <span 
                     onClick={(e) => {
                       e.stopPropagation();
-                      handleViewReceipt(exp.id, exp.title);
+                      if (isBulkMode) {
+                        handleToggleSelect();
+                      } else {
+                        handleViewReceipt(exp.id, exp.title);
+                      }
                     }}
                     title="View receipt"
                     className={`material-symbols-outlined text-[15px] px-1 rounded flex items-center justify-center cursor-pointer transition-colors
@@ -539,13 +841,15 @@ export default function App() {
           </div>
           <div className="flex items-center gap-3">
             <span className={`text-base font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>-{formatCurrency(exp.amount)}</span>
-            <button 
-              onClick={(e) => handleDeleteExpense(exp.id, e)}
-              className={`opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity p-2 rounded-full border-0 bg-transparent cursor-pointer flex items-center justify-center -mr-1 outline-none
-                         ${isDarkMode ? 'text-red-400 hover:bg-red-900/30' : 'text-red-500 hover:bg-red-50'}`}
-            >
-              <span className="material-symbols-outlined text-sm">close</span>
-            </button>
+            {!isBulkMode && (
+              <button 
+                onClick={(e) => handleDeleteExpense(exp.id, e)}
+                className={`opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity p-2 rounded-full border-0 bg-transparent cursor-pointer flex items-center justify-center -mr-1 outline-none
+                           ${isDarkMode ? 'text-red-400 hover:bg-red-900/30' : 'text-red-500 hover:bg-red-50'}`}
+              >
+                <span className="material-symbols-outlined text-sm">close</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -555,9 +859,7 @@ export default function App() {
   const handleResetExpenses = () => {
     if (confirm('Are you sure you want to clear all expenses and reset the total?')) {
       setExpenses([]);
-      setFilterCategory(null);
       setEditingId(null);
-      setSearchQuery('');
     }
   };
 
@@ -581,70 +883,158 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  const totalSpent = useMemo(() => {
-    return expenses.reduce((sum, exp) => sum + exp.amount, 0);
-  }, [expenses]);
-
-  const budgetPercentage = Math.min((totalSpent / budgetLimit) * 100, 100);
-  const isOverBudget = budgetPercentage >= 90;
-
-  const insightText = useMemo(() => {
-    if (expenses.length === 0) return "Ready to track your first expense.";
-    
-    const totals: Record<string, number> = {};
-    expenses.forEach(exp => {
-      totals[exp.categoryId] = (totals[exp.categoryId] || 0) + exp.amount;
-    });
-    
-    let maxCat = '';
-    let maxAmt = 0;
-    Object.entries(totals).forEach(([catId, amt]) => {
-      if (amt > maxAmt) { maxAmt = amt; maxCat = catId; }
-    });
-
-    const categoryLabel = CATEGORIES.find(c => c.id === maxCat)?.label || 'Unknown';
-    const percent = Math.round((maxAmt / totalSpent) * 100);
-    
-    if (isOverBudget) return `Careful! You're approaching your RM${budgetLimit} budget limit.`;
-    return `You've spent ${percent}% of your total on ${categoryLabel} this month.`;
-  }, [expenses, totalSpent, isOverBudget, budgetLimit]);
-
-  // Sorting, Filtering, and Grouping
-  const groupedExpenses = useMemo(() => {
-    let filtered = expenses;
-    
-    if (filterCategory) {
-      filtered = filtered.filter(exp => exp.categoryId === filterCategory);
-    }
-    
-    if (searchQuery.trim()) {
-      const lowerQuery = searchQuery.toLowerCase();
-      filtered = filtered.filter(exp => exp.title.toLowerCase().includes(lowerQuery));
-    }
-
-    // Sort descending by date (newest first)
-    const sorted = [...filtered].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-    const groups: { [key: string]: Expense[] } = {};
-    const today = new Date().toLocaleDateString();
-    const yesterday = new Date(Date.now() - 86400000).toLocaleDateString();
-
-    sorted.forEach(exp => {
-      let groupName = exp.date;
-      if (exp.date === today) groupName = "Today";
-      else if (exp.date === yesterday) groupName = "Yesterday";
+  const handleBackupJSON = async () => {
+    playHaptic('click');
+    try {
+      const receipts = await getAllReceipts();
+      const backupData = {
+        version: 1,
+        expenses,
+        projects,
+        budgetLimit,
+        categoryBudgets,
+        quickTemplates,
+        receipts
+      };
       
-      if (!groups[groupName]) groups[groupName] = [];
-      groups[groupName].push(exp);
-    });
+      const jsonString = JSON.stringify(backupData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `timmy_backup_${new Date().toISOString().split('T')[0]}.json`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      playHaptic('success');
+    } catch (err: unknown) {
+      alert("Backup failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  };
 
-    return groups;
-  }, [expenses, filterCategory, searchQuery]);
+  const handleRestoreJSON = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (restoreFileInputRef.current) restoreFileInputRef.current.value = '';
+
+    const confirmRestore = confirm("Warning: Restoring data will overwrite all current expenses, projects, and receipt images. Are you sure you want to continue?");
+    if (!confirmRestore) return;
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      if (!parsed.expenses || !Array.isArray(parsed.expenses)) {
+        throw new Error("Invalid backup file: 'expenses' array is missing.");
+      }
+
+      // 1. Sanitize expenses to prevent NaN and missing properties
+      const sanitizedExpenses = (parsed.expenses as Array<{
+        id?: string;
+        title?: string;
+        amount?: number | string;
+        date?: string;
+        time?: string;
+        categoryId?: string;
+        hasReceipt?: boolean;
+        scopeType?: 'one-off' | 'weekly' | 'monthly' | 'project';
+        projectId?: string;
+      }>).map((exp) => ({
+        id: String(exp.id || Math.random().toString(36).substring(2, 9)),
+        title: String(exp.title || 'Expense'),
+        amount: Math.max(0, parseFloat(String(exp.amount)) || 0),
+        date: String(exp.date || new Date().toISOString().split('T')[0]),
+        time: exp.time ? String(exp.time) : undefined,
+        categoryId: String(exp.categoryId || 'other'),
+        hasReceipt: !!exp.hasReceipt,
+        scopeType: exp.scopeType || 'one-off',
+        projectId: exp.projectId ? String(exp.projectId) : undefined,
+      }));
+
+      // 2. Sanitize projects
+      let sanitizedProjects: Project[] = [];
+      if (parsed.projects && Array.isArray(parsed.projects)) {
+        sanitizedProjects = (parsed.projects as Array<{
+          id?: string;
+          name?: string;
+          budget?: number | string;
+        }>).map((p) => ({
+          id: String(p.id || Math.random().toString(36).substring(2, 9)),
+          name: String(p.name || 'Unnamed Project'),
+          budget: p.budget !== undefined ? Math.max(0, parseFloat(String(p.budget)) || 0) : undefined,
+        }));
+      }
+
+      // 3. Sanitize budget limit
+      let sanitizedBudgetLimit = 3000;
+      if (parsed.budgetLimit !== undefined) {
+        sanitizedBudgetLimit = Math.max(0, parseFloat(parsed.budgetLimit) || 3000);
+      }
+
+      // 4. Sanitize category budgets
+      const sanitizedCategoryBudgets: Record<string, number> = {};
+      if (parsed.categoryBudgets && typeof parsed.categoryBudgets === 'object') {
+        Object.keys(parsed.categoryBudgets).forEach(key => {
+          const val = parseFloat(parsed.categoryBudgets[key]);
+          if (!isNaN(val)) {
+            sanitizedCategoryBudgets[key] = Math.max(0, val);
+          }
+        });
+      }
+ 
+      // 4b. Sanitize quickTemplates
+      let sanitizedTemplates = quickTemplates;
+      if (parsed.quickTemplates && Array.isArray(parsed.quickTemplates)) {
+        sanitizedTemplates = (parsed.quickTemplates as Array<{
+          id?: string;
+          emoji?: string;
+          title?: string;
+          amount?: number | string;
+          categoryId?: string;
+        }>).map((t, index) => ({
+          id: String(t.id || `t-${index}-${Math.random().toString(36).substring(2, 9)}`),
+          emoji: String(t.emoji || '✨'),
+          title: String(t.title || 'Template'),
+          amount: Math.max(0, parseFloat(String(t.amount)) || 0),
+          categoryId: String(t.categoryId || 'other'),
+        }));
+      }
+
+      // 5. Sanitize receipt images
+      const sanitizedReceipts: Record<string, string> = {};
+      if (parsed.receipts && typeof parsed.receipts === 'object') {
+        Object.keys(parsed.receipts).forEach(key => {
+          if (typeof parsed.receipts[key] === 'string') {
+            sanitizedReceipts[key] = parsed.receipts[key];
+          }
+        });
+      }
+
+      // Restore receipts in IndexedDB first
+      await restoreReceipts(sanitizedReceipts);
+
+      // Save states (triggers localstorage write effects)
+      setExpenses(sanitizedExpenses);
+      setProjects(sanitizedProjects);
+      setBudgetLimit(sanitizedBudgetLimit);
+      setCategoryBudgets(sanitizedCategoryBudgets);
+      setQuickTemplates(sanitizedTemplates);
+
+      playHaptic('success');
+      triggerConfetti();
+      alert("Database restored successfully!");
+    } catch (err: unknown) {
+      alert("Restore failed: " + (err instanceof Error ? err.message : String(err)));
+    }
+  };
 
   const handleTouchStart = (e: React.TouchEvent, id: string) => {
     touchStartX.current = e.touches[0].clientX;
     touchStartY.current = e.touches[0].clientY;
     isSwiping.current = true;
+    setIsSwipingState(true);
     
     // Close other swiped cards
     if (swipeActiveId && swipeActiveId !== id) {
@@ -663,6 +1053,7 @@ export default function App() {
     // Reject vertical scrolling
     if (Math.abs(diffY) > Math.abs(diffX) && swipeActiveId !== id) {
       isSwiping.current = false;
+      setIsSwipingState(false);
       return;
     }
 
@@ -677,6 +1068,7 @@ export default function App() {
 
   const handleTouchEnd = () => {
     isSwiping.current = false;
+    setIsSwipingState(false);
     if (swipeDistance < -60) {
       setSwipeDistance(-80);
     } else if (swipeDistance > 60) {
@@ -697,8 +1089,9 @@ export default function App() {
   };
 
   return (
-    <div className={`min-h-[100dvh] w-full flex items-center justify-center p-0 md:p-6 font-[system-ui,-apple-system,BlinkMacSystemFont,'Segoe_UI',Roboto,Helvetica,Arial,sans-serif] antialiased transition-colors duration-700 
-                    ${isDarkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#faf8ff] text-slate-900'}`}>
+    <div className={`min-h-[100dvh] w-full flex items-center justify-center p-0 md:p-6 antialiased transition-colors duration-700 
+                    ${isDarkMode ? 'bg-[#070a14] text-slate-100' : 'bg-[#f0eeff] text-slate-900'}`}
+         style={{ fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif" }}>
       
       {/* Dynamic Background Blobs */}
       <div className={`fixed inset-0 z-0 overflow-hidden pointer-events-none transition-opacity duration-700 flex items-center justify-center ${isDarkMode ? 'opacity-30' : 'opacity-60'}`}>
@@ -711,150 +1104,116 @@ export default function App() {
       </div>
 
       {/* Main Container */}
-      <div className={`relative z-10 flex flex-col overflow-hidden backdrop-blur-[40px] border-x-0 border-y-0 md:border w-full h-[100dvh] md:h-[85dvh] md:max-h-[800px] md:w-[420px] md:rounded-[2.5rem] md:shadow-[0_20px_60px_rgba(0,0,0,0.15)] transition-all duration-500
+      <div className={`relative z-10 flex flex-col overflow-hidden backdrop-blur-[40px] border-x-0 border-y-0 md:border w-full h-[100dvh] md:h-[85dvh] md:max-h-[800px] md:w-[420px] md:rounded-[2.5rem] md:shadow-[0_20px_60px_rgba(0,0,0,0.15)] transition-all duration-[350ms] ease-out
                       ${isDarkMode ? 'bg-black/60 border-white/10 shadow-[0_20px_60px_rgba(0,0,0,0.8)]' : 'bg-white/70 border-white/60'}`}>
         
         {/* Header */}
-        <div className={`flex items-center justify-between px-7 pt-12 pb-6 shrink-0 bg-gradient-to-b ${isDarkMode ? 'from-black/60 to-transparent' : 'from-white/60 to-transparent'}`}>
-          <h1 className={`text-xl font-bold tracking-tight m-0 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Aether Wallet</h1>
-          <button 
-            onClick={() => setIsDarkMode(!isDarkMode)}
-            className={`p-2 rounded-full transition-colors border-0 cursor-pointer flex items-center justify-center outline-none ${isDarkMode ? 'bg-slate-800 text-yellow-400 hover:bg-slate-700' : 'bg-white text-slate-500 hover:bg-slate-100 shadow-sm'}`}
-          >
-            <span className="material-symbols-outlined text-[20px]">
-              {isDarkMode ? 'light_mode' : 'dark_mode'}
-            </span>
-          </button>
-        </div>
-
-        {/* Balance Display with Chart & Budget */}
-        <div className={`px-8 pb-6 flex flex-col shrink-0 border-b ${isDarkMode ? 'border-white/10' : 'border-slate-200/60'}`}>
-          <div className="flex items-center justify-between">
-            <div className="flex flex-col">
-              <div className="flex items-center gap-2 mb-1">
-                <span className={`text-xs font-semibold tracking-widest uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Total Spent</span>
-                {expenses.length > 0 && (
-                  <button 
-                    onClick={handleResetExpenses}
-                    title="Reset all expenses"
-                    className={`p-1 rounded-full border-0 bg-transparent cursor-pointer flex items-center justify-center transition-colors outline-none
-                               ${isDarkMode ? 'text-slate-500 hover:text-red-400 hover:bg-slate-800' : 'text-slate-400 hover:text-red-500 hover:bg-slate-100'}`}
-                  >
-                    <span className="material-symbols-outlined text-[14px]">refresh</span>
-                  </button>
-                )}
-              </div>
-              <div className="flex items-start">
-                <span className={`text-2xl font-semibold mt-2 mr-1.5 ${isDarkMode ? 'text-slate-300' : 'text-slate-400'}`}>RM</span>
-                <span className={`text-5xl font-bold tracking-tighter ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{totalSpent.toFixed(2).split('.')[0]}</span>
-                <span className={`text-2xl font-bold mt-2 ${isDarkMode ? 'text-slate-300' : 'text-slate-800'}`}>.{totalSpent.toFixed(2).split('.')[1]}</span>
-              </div>
+        <div className={`flex items-center justify-between px-6 pt-10 pb-4 shrink-0`}
+             style={{ background: isDarkMode ? 'linear-gradient(180deg, rgba(7,10,20,0.95) 0%, transparent 100%)' : 'linear-gradient(180deg, rgba(240,238,255,0.95) 0%, transparent 100%)' }}>
+          {/* Brand */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{
+              width: '32px', height: '32px', borderRadius: '10px',
+              background: 'linear-gradient(135deg, #4f46e5, #8b5cf6)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 12px rgba(79,70,229,0.4)',
+            }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px', color: '#fff', fontVariationSettings: "'FILL' 1" }}>account_balance_wallet</span>
             </div>
-            <div className="ml-4 shrink-0 relative">
-              <DonutChart 
-                expenses={expenses} 
-                categories={CATEGORIES} 
-                filterCategory={filterCategory}
-                onCategoryClick={(id) => setFilterCategory(prev => prev === id ? null : id)}
-              />
-              {filterCategory && (
-                <button 
-                  onClick={() => setFilterCategory(null)}
-                  className="absolute -top-2 -right-2 bg-slate-800 text-white rounded-full p-0.5 shadow-md flex items-center justify-center scale-75 hover:bg-slate-700 cursor-pointer border-0"
-                >
-                  <span className="material-symbols-outlined text-[16px]">close</span>
-                </button>
-              )}
+            <div>
+              <h1 style={{
+                margin: 0, fontSize: '1rem', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1,
+                background: isDarkMode ? 'linear-gradient(135deg, #e0e7ff 0%, #a5b4fc 100%)' : 'linear-gradient(135deg, #4f46e5 0%, #8b5cf6 100%)',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text',
+              }}>Timmy Wallet</h1>
+              <p style={{ margin: 0, fontSize: '0.55rem', fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: isDarkMode ? 'rgba(165,180,252,0.55)' : 'rgba(99,102,241,0.5)' }}>Smart Finance</p>
             </div>
           </div>
-
-          <div className="mt-6 w-full">
-            <div className="flex justify-between items-end mb-2">
-              <div className="flex items-center gap-2">
-                <span className={`text-[10px] font-bold tracking-wider uppercase ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Monthly Budget</span>
-                <button 
-                  onClick={handleExportCSV}
-                  title="Export to CSV"
-                  className={`border-0 bg-transparent p-0 flex items-center justify-center cursor-pointer opacity-50 hover:opacity-100 transition-opacity ${isDarkMode ? 'text-blue-400' : 'text-blue-600'}`}
-                >
-                  <span className="material-symbols-outlined text-[14px]">download</span>
-                </button>
-              </div>
-              <span className={`text-[11px] font-semibold flex items-center gap-1 ${isDarkMode ? 'text-slate-300' : 'text-slate-600'}`}>
-                {formatCurrency(totalSpent)} / 
-                {isEditingBudget ? (
-                  <input 
-                    type="number" 
-                    autoFocus
-                    value={editBudgetVal}
-                    onChange={e => setEditBudgetVal(e.target.value)}
-                    onBlur={() => {
-                      setIsEditingBudget(false);
-                      const val = parseFloat(editBudgetVal);
-                      if (val > 0) setBudgetLimit(val);
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') {
-                        setIsEditingBudget(false);
-                        const val = parseFloat(editBudgetVal);
-                        if (val > 0) setBudgetLimit(val);
-                      }
-                    }}
-                    className={`w-14 bg-transparent border-b text-center focus:outline-none p-0 m-0 ${isDarkMode ? 'border-blue-400 text-blue-400' : 'border-blue-500 text-blue-600'}`} 
-                  />
-                ) : (
-                  <span 
-                    onClick={() => { setIsEditingBudget(true); setEditBudgetVal(budgetLimit.toString()); }} 
-                    className="cursor-pointer hover:text-blue-500 underline decoration-dashed decoration-slate-400 underline-offset-2"
-                    title="Click to edit budget"
-                  >
-                    RM{budgetLimit}
-                  </span>
-                )}
+          {/* Header actions */}
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <button
+              onClick={() => setIsDarkMode(!isDarkMode)}
+              style={{
+                width: '34px', height: '34px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.8)',
+                color: isDarkMode ? '#fbbf24' : '#6366f1',
+                boxShadow: isDarkMode ? 'none' : '0 2px 8px rgba(99,102,241,0.15)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '16px', fontVariationSettings: "'FILL' 1" }}>
+                {isDarkMode ? 'light_mode' : 'dark_mode'}
               </span>
-            </div>
-            <div className={`w-full h-1.5 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800' : 'bg-slate-200'}`}>
-              <div 
-                className={`h-full rounded-full transition-all duration-1000 ease-out ${isOverBudget ? 'bg-red-500' : (isDarkMode ? 'bg-white' : 'bg-slate-800')}`}
-                style={{ width: `${budgetPercentage}%` }}
-              ></div>
-            </div>
+            </button>
+            <button
+              onClick={() => { playHaptic('click'); setIsBudgetSheetOpen(true); }}
+              style={{
+                width: '34px', height: '34px', borderRadius: '12px', border: 'none', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.8)',
+                color: isDarkMode ? '#a5b4fc' : '#6366f1',
+                boxShadow: isDarkMode ? 'none' : '0 2px 8px rgba(99,102,241,0.15)',
+                transition: 'all 0.2s ease',
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>tune</span>
+            </button>
           </div>
-
-          <div className={`mt-4 px-4 py-3 rounded-xl flex items-start gap-3 ${isDarkMode ? 'bg-slate-800/60 text-slate-300' : 'bg-white/60 text-slate-600 shadow-sm'}`}>
-            <span className={`material-symbols-outlined text-[18px] mt-0.5 ${isOverBudget ? 'text-red-500' : (isDarkMode ? 'text-white' : 'text-slate-800')}`}>
-              {isOverBudget ? 'warning' : 'tips_and_updates'}
-            </span>
-            <p className="text-xs font-medium leading-relaxed m-0">{insightText}</p>
-          </div>
-          
-          {/* Sparkline Chart */}
-          <Sparkline expenses={expenses} isDarkMode={isDarkMode} />
         </div>
+
+        <input 
+          type="file"
+          accept=".json"
+          ref={restoreFileInputRef}
+          onChange={handleRestoreJSON}
+          className="hidden"
+        />
 
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col w-full relative">
           
           {/* Segmented Tab Selector */}
-          <div className={`px-6 pt-4 pb-2 border-b shrink-0 transition-colors ${isDarkMode ? 'bg-black/20 border-white/5' : 'bg-slate-50/30 border-slate-200/50'}`}>
-            <div className={`flex p-1 rounded-2xl border ${isDarkMode ? 'bg-slate-950/80 border-slate-800' : 'bg-slate-100/80 border-slate-200'}`}>
+          <div style={{
+            padding: '0.6rem 1rem 0.5rem',
+            borderBottom: isDarkMode ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(99,102,241,0.1)',
+            flexShrink: 0,
+            background: isDarkMode ? 'rgba(7,10,20,0.6)' : 'rgba(240,238,255,0.6)',
+            backdropFilter: 'blur(8px)',
+          }}>
+            <div style={{
+              display: 'flex', padding: '4px', gap: '2px',
+              borderRadius: '14px',
+              background: isDarkMode ? 'rgba(255,255,255,0.04)' : 'rgba(255,255,255,0.55)',
+              border: isDarkMode ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(99,102,241,0.15)',
+              boxShadow: isDarkMode ? 'none' : '0 2px 8px rgba(99,102,241,0.08)',
+            }}>
               {(['transactions', 'recurrings', 'projects'] as const).map(tab => {
                 const isSelected = currentTab === tab;
                 const labels = { transactions: 'Transactions', recurrings: 'Commitments', projects: 'Projects' };
-                const icons = { transactions: 'receipt_long', recurrings: 'autorenew', projects: 'folder' };
+                const icons  = { transactions: 'receipt_long', recurrings: 'autorenew', projects: 'folder_open' };
                 return (
                   <button
                     key={tab}
-                    onClick={() => {
-                      setCurrentTab(tab);
-                      setSelectedProjectDetailId(null); // Reset drilldown when switching tabs
+                    onClick={() => { playHaptic('click'); setCurrentTab(tab); setSelectedProjectDetailId(null); }}
+                    style={{
+                      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px',
+                      padding: '7px 4px',
+                      borderRadius: '10px', border: 'none', outline: 'none', cursor: 'pointer',
+                      fontSize: '0.68rem', fontWeight: 700, letterSpacing: '0.01em',
+                      fontFamily: 'inherit',
+                      transition: 'all 0.2s cubic-bezier(0.16,1,0.3,1)',
+                      background: isSelected
+                        ? (isDarkMode ? 'linear-gradient(135deg, #4f46e5, #7c3aed)' : 'linear-gradient(135deg, #4f46e5, #7c3aed)')
+                        : 'transparent',
+                      color: isSelected ? '#fff' : (isDarkMode ? 'rgba(148,163,184,0.7)' : 'rgba(99,102,241,0.5)'),
+                      boxShadow: isSelected ? '0 4px 12px rgba(79,70,229,0.35)' : 'none',
                     }}
-                    className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all border-0 outline-none cursor-pointer
-                               ${isSelected 
-                                 ? (isDarkMode ? 'bg-slate-900 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm') 
-                                 : (isDarkMode ? 'text-slate-500 hover:text-slate-400' : 'text-slate-500 hover:text-slate-600')}`}
                   >
-                    <span className="material-symbols-outlined text-[16px]">{icons[tab]}</span>
+                    <span className="material-symbols-outlined" style={{
+                      fontSize: '14px',
+                      fontVariationSettings: isSelected ? "'FILL' 1" : "'FILL' 0",
+                    }}>{icons[tab]}</span>
                     {labels[tab]}
                   </button>
                 );
@@ -864,57 +1223,15 @@ export default function App() {
 
           {/* Tab 1: Transactions List */}
           {currentTab === 'transactions' && (
-            <div className={`flex-1 flex flex-col relative ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
-              {/* Sticky Search Bar */}
-              <div className={`sticky top-0 z-20 px-6 py-4 backdrop-blur-xl border-b transition-colors ${isDarkMode ? 'bg-black/40 border-white/5' : 'bg-white/40 border-slate-200/50'}`}>
-                <div className="relative group">
-                  <span className={`absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[18px] transition-colors ${isDarkMode ? 'text-slate-500 group-focus-within:text-blue-400' : 'text-slate-400 group-focus-within:text-blue-500'}`}>search</span>
-                  <input 
-                    type="text" 
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search notes or amounts..."
-                    className={`w-full pl-10 pr-4 py-2.5 rounded-xl text-sm outline-none transition-all
-                               ${isDarkMode 
-                                 ? 'bg-slate-900/50 border border-slate-700/50 text-slate-200 placeholder-slate-500 focus:bg-slate-800/80 focus:border-blue-500/50 focus:shadow-[0_0_10px_rgba(59,130,246,0.1)]' 
-                                 : 'bg-white/60 border border-slate-200 text-slate-700 placeholder-slate-400 focus:bg-white focus:border-blue-400 focus:shadow-sm'}`}
-                  />
-                  {searchQuery && (
-                    <button 
-                      onClick={() => setSearchQuery('')}
-                      className={`absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[16px] rounded-full p-0.5 border-0 cursor-pointer transition-colors
-                                 ${isDarkMode ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-700' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
-                    >
-                      close
-                    </button>
-                  )}
-                </div>
+            <Dashboard
+              expenses={expenses}
+              isDarkMode={isDarkMode}
+              budgetLimit={budgetLimit}
+            >
+              <div className="space-y-2">
+                {expenses.length === 0 ? null : expenses.map((exp, i) => renderExpenseItem(exp, i))}
               </div>
-
-              <div className="px-6 pb-24 pt-4">
-                {Object.keys(groupedExpenses).length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-10 opacity-40">
-                    <span className={`material-symbols-outlined text-4xl mb-3 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {searchQuery ? 'search_off' : 'receipt_long'}
-                    </span>
-                    <p className={`text-sm font-medium m-0 text-center ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      {searchQuery ? `No notes found matching "${searchQuery}"` : "No transactions found"}
-                    </p>
-                  </div>
-                ) : (
-                  Object.entries(groupedExpenses).map(([dateGroup, groupExpenses]) => (
-                    <div key={dateGroup} className="mb-4">
-                      <div className={`sticky top-0 py-2 backdrop-blur-md z-10 ${isDarkMode ? 'bg-black/60' : 'bg-slate-50/90'}`}>
-                        <h3 className={`text-[11px] font-bold uppercase tracking-widest m-0 pl-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{dateGroup}</h3>
-                      </div>
-                      <div className="space-y-2 mt-1">
-                        {groupExpenses.map((exp, i) => renderExpenseItem(exp, i))}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            </Dashboard>
           )}
 
           {/* Tab 2: Commitments / Recurrings View */}
@@ -923,6 +1240,30 @@ export default function App() {
             const monthlyItems = expenses.filter(exp => exp.scopeType === 'monthly');
             const weeklyTotal = weeklyItems.reduce((acc, curr) => acc + curr.amount, 0);
             const monthlyTotal = monthlyItems.reduce((acc, curr) => acc + curr.amount, 0);
+
+            const calendarDays = Array.from({ length: 14 }).map((_, i) => {
+              const d = new Date();
+              d.setDate(new Date().getDate() + i);
+              d.setHours(0, 0, 0, 0);
+              return d;
+            });
+
+            const getDuesForDay = (date: Date) => {
+              const dayOfWeek = date.getDay();
+              const dayOfMonth = date.getDate();
+              
+              const dueWeekly = weeklyItems.filter(exp => {
+                const expDate = new Date(exp.date);
+                return !isNaN(expDate.getTime()) && expDate.getDay() === dayOfWeek;
+              });
+              
+              const dueMonthly = monthlyItems.filter(exp => {
+                const expDate = new Date(exp.date);
+                return !isNaN(expDate.getTime()) && expDate.getDate() === dayOfMonth;
+              });
+              
+              return [...dueWeekly, ...dueMonthly];
+            };
             
             return (
               <div className={`flex-1 flex flex-col p-6 space-y-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
@@ -953,33 +1294,115 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Weekly Commitments List */}
+                {/* V7: 14-Day Rolling Subscriptions Calendar Strip */}
                 <div className="flex flex-col gap-2">
-                  <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Weekly Commitments</h3>
-                  {weeklyItems.length === 0 ? (
-                    <div className={`text-center py-6 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
-                      No weekly commitments found.
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {weeklyItems.map((exp, i) => renderExpenseItem(exp, i))}
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between pl-1">
+                    <span className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Bill Calendar (Next 14 Days)</span>
+                    {selectedCalendarDateIndex !== null && (
+                      <button
+                        onClick={() => { playHaptic('click'); setSelectedCalendarDateIndex(null); }}
+                        className={`text-[10px] font-bold border-0 bg-transparent cursor-pointer hover:underline text-indigo-500`}
+                      >
+                        Show All
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-2 overflow-x-auto pb-1.5 custom-scrollbar mask-linear-x shrink-0">
+                    {calendarDays.map((day, idx) => {
+                      const dayNameShort = day.toLocaleDateString('en-US', { weekday: 'short' });
+                      const dayNum = day.getDate();
+                      const dues = getDuesForDay(day);
+                      const hasDues = dues.length > 0;
+                      const isSelected = selectedCalendarDateIndex === idx;
+                      
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => {
+                            playHaptic('click');
+                            setSelectedCalendarDateIndex(isSelected ? null : idx);
+                          }}
+                          className={`flex flex-col items-center justify-between p-2.5 rounded-2xl w-11 h-14 border shrink-0 transition-all cursor-pointer select-none
+                                     ${isSelected 
+                                       ? 'bg-indigo-600 border-indigo-600 text-white scale-105 shadow-md shadow-indigo-600/20' 
+                                       : hasDues
+                                         ? (isDarkMode ? 'bg-slate-900/80 border-indigo-500/40 text-slate-200' : 'bg-indigo-50/50 border-indigo-200 text-indigo-950')
+                                         : (isDarkMode ? 'bg-slate-900/30 border-slate-800/80 text-slate-400 hover:bg-slate-800/50' : 'bg-white border-slate-200/50 text-slate-600 hover:bg-slate-50')}`}
+                        >
+                          <span className={`text-[9px] font-bold uppercase ${isSelected ? 'text-indigo-200' : 'opacity-60'}`}>{dayNameShort}</span>
+                          <span className="text-sm font-extrabold">{dayNum}</span>
+                          
+                          {/* Dot Indicators */}
+                          <div className="flex gap-0.5 justify-center mt-0.5 h-1">
+                            {dues.slice(0, 3).map((due, dIdx) => {
+                              const cat = CATEGORIES.find(c => c.id === due.categoryId) || CATEGORIES[5];
+                              return (
+                                <div 
+                                  key={dIdx} 
+                                  className="w-1.5 h-1.5 rounded-full" 
+                                  style={{ backgroundColor: isSelected ? '#ffffff' : cat.color }} 
+                                />
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
 
-                {/* Monthly Commitments List */}
-                <div className="flex flex-col gap-2 pt-2">
-                  <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Monthly Commitments</h3>
-                  {monthlyItems.length === 0 ? (
-                    <div className={`text-center py-6 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
-                      No monthly commitments found.
+                {/* Dues List or Weekly/Monthly lists */}
+                {selectedCalendarDateIndex !== null ? (() => {
+                  const targetDay = calendarDays[selectedCalendarDateIndex];
+                  const dues = getDuesForDay(targetDay);
+                  return (
+                    <div className="flex flex-col gap-2">
+                      <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                        Bills Due on {targetDay.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                      </h3>
+                      {dues.length === 0 ? (
+                        <div className={`text-center py-6 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                          No bills due on this day.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {dues.map((exp, i) => renderExpenseItem(exp, i))}
+                        </div>
+                      )}
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {monthlyItems.map((exp, i) => renderExpenseItem(exp, i))}
+                  );
+                })() : (
+                  <>
+                    {/* Weekly Commitments List */}
+                    <div className="flex flex-col gap-2">
+                      <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Weekly Commitments</h3>
+                      {weeklyItems.length === 0 ? (
+                        <div className={`text-center py-6 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                          No weekly commitments found.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {weeklyItems.map((exp, i) => renderExpenseItem(exp, i))}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+
+                    {/* Monthly Commitments List */}
+                    <div className="flex flex-col gap-2 pt-2">
+                      <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Monthly Commitments</h3>
+                      {monthlyItems.length === 0 ? (
+                        <div className={`text-center py-6 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
+                          No monthly commitments found.
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {monthlyItems.map((exp, i) => renderExpenseItem(exp, i))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             );
           })()}
@@ -1019,19 +1442,45 @@ export default function App() {
                   </div>
 
                   {/* Summary Card */}
-                  <div className={`p-5 rounded-3xl border flex flex-col justify-between mb-6 relative overflow-hidden transition-all ${isDarkMode ? 'bg-slate-900/50 border-cyan-500/10' : 'bg-cyan-50/20 border-cyan-200'}`}>
+                  <div className={`p-5 rounded-3xl border flex flex-col gap-4 mb-6 relative overflow-hidden transition-all ${isDarkMode ? 'bg-slate-900/50 border-cyan-500/10' : 'bg-cyan-50/20 border-cyan-200'}`}>
                     <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-xl translate-x-4 -translate-y-4"></div>
                     <div>
                       <div className="flex items-center gap-2 mb-1">
                         <span className="material-symbols-outlined text-[20px] text-cyan-500 animate-pulse">folder</span>
-                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Project Cost</span>
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                          {typeof project.budget === 'number' && project.budget > 0 ? `Project Cost / Budget RM${project.budget}` : 'Project Cost'}
+                        </span>
                       </div>
                       <h2 className={`text-xl font-bold tracking-tight m-0 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{project.name}</h2>
                     </div>
-                    <div className="mt-4 pt-4 border-t border-slate-500/10 flex items-end justify-between">
-                      <span className={`text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Accumulated Expense</span>
-                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(projectTotal)}</span>
-                    </div>
+
+                    {typeof project.budget === 'number' && project.budget > 0 && (() => {
+                      const projPercent = Math.min((projectTotal / project.budget) * 100, 100);
+                      const isProjOver = projectTotal > project.budget;
+                      return (
+                        <div className="w-full flex flex-col gap-1.5 pt-1">
+                          <div className="flex justify-between items-center text-[10px] font-bold opacity-60">
+                            <span>Cost Progress</span>
+                            <span className={isProjOver ? 'text-red-500' : ''}>
+                              {formatCurrency(projectTotal)} / {formatCurrency(project.budget)} ({projPercent.toFixed(0)}%)
+                            </span>
+                          </div>
+                          <div className={`w-full h-1.5 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
+                            <div 
+                              className={`h-full rounded-full transition-all duration-500 ${isProjOver ? 'bg-red-500' : 'bg-cyan-500'}`}
+                              style={{ width: `${projPercent}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {(!project.budget || project.budget <= 0) && (
+                      <div className="mt-2 pt-4 border-t border-slate-500/10 flex items-end justify-between">
+                        <span className={`text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Accumulated Expense</span>
+                        <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(projectTotal)}</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Expenses List */}
@@ -1058,31 +1507,48 @@ export default function App() {
                 {/* Project Creator Card */}
                 <div className={`p-4 rounded-3xl border flex flex-col gap-3 transition-all ${isDarkMode ? 'bg-slate-900/30 border-slate-800' : 'bg-white border-slate-200/60 shadow-sm'}`}>
                   <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 m-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Create New Project</h3>
-                  <div className="flex gap-2">
-                    <div className={`flex-1 flex items-center gap-2 px-4 py-2.5 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500' : 'bg-slate-50 border-slate-200 focus-within:border-blue-400'}`}>
-                      <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>create_new_folder</span>
-                      <input 
-                        type="text" 
-                        value={newProjectName}
-                        onChange={(e) => setNewProjectName(e.target.value)}
-                        placeholder="Project Name (e.g. Prototype Cost)"
-                        className={`w-full bg-transparent border-none outline-none text-sm p-0 ${isDarkMode ? 'text-slate-200 placeholder-slate-600' : 'text-slate-700 placeholder-slate-400'}`}
-                      />
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <div className={`flex-1 flex items-center gap-2 px-4 py-2.5 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500' : 'bg-slate-50 border-slate-200 focus-within:border-blue-400'}`}>
+                        <span className={`material-symbols-outlined text-[18px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>create_new_folder</span>
+                        <input 
+                          type="text" 
+                          value={newProjectName}
+                          onChange={(e) => setNewProjectName(e.target.value)}
+                          placeholder="Project Name (e.g. Prototype)"
+                          className={`w-full bg-transparent border-none outline-none text-sm p-0 ${isDarkMode ? 'text-slate-200 placeholder-slate-600' : 'text-slate-700 placeholder-slate-400'}`}
+                        />
+                      </div>
+                      <div className={`w-28 flex items-center gap-1.5 px-3 py-2.5 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-900/50 border-slate-700 focus-within:border-blue-500' : 'bg-slate-50 border-slate-200 focus-within:border-blue-400'}`}>
+                        <span className="text-xs font-bold opacity-60">RM</span>
+                        <input 
+                          type="number" 
+                          value={newProjectBudget}
+                          onChange={(e) => setNewProjectBudget(e.target.value)}
+                          placeholder="Budget (opt)"
+                          className={`w-full bg-transparent border-none outline-none text-sm p-0 ${isDarkMode ? 'text-slate-200 placeholder-slate-600' : 'text-slate-700 placeholder-slate-400'}`}
+                        />
+                      </div>
                     </div>
                     <button
                       onClick={() => {
                         if (newProjectName.trim()) {
+                          const budgetVal = newProjectBudget.trim() ? parseFloat(newProjectBudget) : undefined;
                           const newProj = {
-                            id: 'proj_' + Date.now(),
-                            name: newProjectName.trim()
+                            id: 'proj_' + getNow(),
+                            name: newProjectName.trim(),
+                            budget: budgetVal
                           };
                           setProjects(prev => [...prev, newProj]);
                           setNewProjectName('');
+                          setNewProjectBudget('');
+                          playHaptic('success');
+                          triggerConfetti();
                         }
                       }}
-                      className="bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs px-4 py-2.5 border-0 cursor-pointer font-bold transition-all active:scale-[0.98]"
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-xs py-2.5 border-0 cursor-pointer font-bold transition-all active:scale-[0.98]"
                     >
-                      Create
+                      Create Project
                     </button>
                   </div>
                 </div>
@@ -1105,24 +1571,50 @@ export default function App() {
                           <div
                             key={proj.id}
                             onClick={() => setSelectedProjectDetailId(proj.id)}
-                            className={`p-4 rounded-2xl border flex items-center justify-between cursor-pointer group transition-all hover:-translate-y-0.5 active:scale-[0.99]
+                            className={`p-4 rounded-2xl border flex flex-col gap-3 cursor-pointer group transition-all hover:-translate-y-0.5 active:scale-[0.99]
                                        ${isDarkMode 
                                          ? 'bg-slate-800/30 border-slate-700/50 hover:bg-slate-800 hover:border-slate-600' 
                                          : 'bg-white border-slate-200/60 shadow-sm hover:shadow-md hover:border-slate-300'}`}
                           >
-                            <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${isDarkMode ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-cyan-50 border-cyan-200 text-cyan-600'}`}>
-                                <span className="material-symbols-outlined text-[20px]">folder</span>
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border transition-colors ${isDarkMode ? 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400' : 'bg-cyan-50 border-cyan-200 text-cyan-600'}`}>
+                                  <span className="material-symbols-outlined text-[20px]">folder</span>
+                                </div>
+                                <div className="flex flex-col">
+                                  <span className={`text-[15px] font-semibold transition-colors group-hover:text-blue-500 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{proj.name}</span>
+                                  <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                    {projExpenses.length} expenses
+                                    {typeof proj.budget === 'number' && proj.budget > 0 && ` • Budget RM${proj.budget}`}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex flex-col">
-                                <span className={`text-[15px] font-semibold transition-colors group-hover:text-blue-500 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{proj.name}</span>
-                                <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{projExpenses.length} expenses</span>
+                              <div className="flex items-center gap-3">
+                                <span className={`text-base font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{formatCurrency(projTotal)}</span>
+                                <span className={`material-symbols-outlined text-slate-400 transition-transform group-hover:translate-x-0.5`}>chevron_right</span>
                               </div>
                             </div>
-                            <div className="flex items-center gap-3">
-                              <span className={`text-base font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{formatCurrency(projTotal)}</span>
-                              <span className={`material-symbols-outlined text-slate-400 transition-transform group-hover:translate-x-0.5`}>chevron_right</span>
-                            </div>
+
+                            {typeof proj.budget === 'number' && proj.budget > 0 && (() => {
+                              const projPercent = Math.min((projTotal / proj.budget) * 100, 100);
+                              const isProjOver = projTotal > proj.budget;
+                              return (
+                                <div className="w-full flex flex-col gap-1.5 pt-1">
+                                  <div className="flex justify-between items-center text-[10px] font-bold opacity-60">
+                                    <span>Cost Progress</span>
+                                    <span className={isProjOver ? 'text-red-500' : ''}>
+                                      {projPercent.toFixed(0)}%
+                                    </span>
+                                  </div>
+                                  <div className={`w-full h-1 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800/80' : 'bg-slate-100'}`}>
+                                    <div 
+                                      className={`h-full rounded-full transition-all duration-500 ${isProjOver ? 'bg-red-500' : 'bg-cyan-500'}`}
+                                      style={{ width: `${projPercent}%` }}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </div>
                         );
                       })}
@@ -1135,17 +1627,88 @@ export default function App() {
           })()}
         </div>
       
-      <button 
-        onClick={handleOpenNewBottomSheet}
-        className={`fixed bottom-8 right-8 md:bottom-12 md:right-[calc(50vw-200px)] w-14 h-14 rounded-full shadow-lg hover:shadow-xl hover:-translate-y-1 active:scale-95 transition-all flex items-center justify-center z-40 border-0 cursor-pointer ${isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}`}
-      >
-        <span className="material-symbols-outlined text-3xl">add</span>
-      </button>
+      {!isBulkMode ? (
+        <button 
+          onClick={handleOpenNewBottomSheet}
+          className={`fixed bottom-8 right-8 md:bottom-12 md:right-[calc(50vw-200px)] w-14 h-14 rounded-full shadow-lg hover:shadow-xl hover:-translate-y-1 active:scale-95 transition-all flex items-center justify-center z-40 border-0 cursor-pointer ${isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}`}
+        >
+          <span className="material-symbols-outlined text-3xl">add</span>
+        </button>
+      ) : (
+        <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-md z-45 p-4 rounded-2xl border backdrop-blur-xl shadow-lg flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-5 duration-300
+                        ${isDarkMode ? 'bg-slate-950/95 border-indigo-500/30 text-white' : 'bg-white/95 border-indigo-200 text-slate-800'}`}>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+              {selectedExpenseIds.length} item{selectedExpenseIds.length !== 1 && 's'} selected
+            </span>
+            <button
+              onClick={() => {
+                playHaptic('click');
+                setSelectedExpenseIds([]);
+                setIsBulkMode(false);
+                setIsBatchCategoryOpen(false);
+              }}
+              className="text-xs font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 border-0 bg-transparent cursor-pointer"
+            >
+              Cancel
+            </button>
+          </div>
+          
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                playHaptic('click');
+                setIsBatchCategoryOpen(!isBatchCategoryOpen);
+              }}
+              disabled={selectedExpenseIds.length === 0}
+              className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border outline-none cursor-pointer flex items-center justify-center gap-1.5
+                         ${selectedExpenseIds.length === 0 
+                           ? 'opacity-40 cursor-not-allowed border-slate-200 text-slate-400 dark:border-slate-800' 
+                           : (isDarkMode 
+                               ? 'bg-slate-900 border-slate-800 text-slate-200 hover:bg-slate-800' 
+                               : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100')}`}
+            >
+              <span className="material-symbols-outlined text-[16px]">sell</span>
+              Category
+            </button>
+            
+            <button
+              onClick={handleBatchDelete}
+              disabled={selectedExpenseIds.length === 0}
+              className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all border-0 outline-none cursor-pointer flex items-center justify-center gap-1.5 text-white bg-red-600 hover:bg-red-700 shadow-md shadow-red-600/10
+                         ${selectedExpenseIds.length === 0 ? 'opacity-40 cursor-not-allowed' : ''}`}
+            >
+              <span className="material-symbols-outlined text-[16px]">delete</span>
+              Delete
+            </button>
+          </div>
+
+          {/* Batch Category Selector Popover */}
+          {isBatchCategoryOpen && selectedExpenseIds.length > 0 && (
+            <div className={`mt-2 p-3 rounded-xl border grid grid-cols-3 gap-2 animate-in fade-in zoom-in-95 duration-200
+                            ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
+              {CATEGORIES.map(cat => (
+                <button
+                  key={cat.id}
+                  onClick={() => handleBatchChangeCategory(cat.id)}
+                  className={`flex items-center gap-1.5 p-2 rounded-lg text-[11px] font-semibold border transition-all cursor-pointer outline-none hover:scale-[1.02] active:scale-[0.98]
+                             ${isDarkMode 
+                               ? 'bg-slate-950/40 border-slate-800 hover:bg-slate-950/80 text-slate-300' 
+                               : 'bg-white border-slate-200 hover:bg-white text-slate-600 shadow-sm'}`}
+                >
+                  <span className="text-[13px]">{cat.emoji}</span>
+                  <span className="truncate">{cat.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Bottom Sheet Overlay */}
       <div 
         className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${isBottomSheetOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-        onClick={() => { setIsBottomSheetOpen(false); setScannedImage(null); }}
+        onClick={() => { playHaptic('click'); setIsBottomSheetOpen(false); setScannedImage(null); }}
       >
         <div 
           className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md rounded-t-[2rem] p-6 pt-2 transition-transform duration-300 transform ${isBottomSheetOpen ? 'translate-y-0 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]' : 'translate-y-full'} ${isDarkMode ? 'bg-slate-900 border-t border-slate-800' : 'bg-slate-50 border-t border-slate-200'}`}
@@ -1245,7 +1808,7 @@ export default function App() {
                       <button
                         key={cat.id}
                         type="button"
-                        onClick={() => setSelectedCategory(cat.id)}
+                        onClick={() => { playHaptic('click'); setSelectedCategory(cat.id); }}
                         className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer border-0 outline-none
                                   ${isSelected 
                                     ? 'text-white shadow-md scale-105' 
@@ -1281,6 +1844,7 @@ export default function App() {
                         key={type}
                         type="button"
                         onClick={() => {
+                          playHaptic('click');
                           setScopeType(type);
                           if (type === 'project' && projects.length > 0 && !selectedProjectId) {
                             setSelectedProjectId(projects[0].id);
@@ -1410,7 +1974,7 @@ export default function App() {
                     type="button"
                     onClick={async (e) => {
                       if (confirm('Delete this expense?')) {
-                        await handleDeleteExpense(editingId, e as any);
+                        await handleDeleteExpense(editingId, e);
                         setIsBottomSheetOpen(false);
                       }
                     }}
@@ -1505,6 +2069,427 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Budget Settings Sheet Overlay */}
+      <div 
+        className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${isBudgetSheetOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        onClick={() => { playHaptic('click'); setIsBudgetSheetOpen(false); }}
+      >
+        <div 
+          className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md rounded-t-[2rem] p-6 pt-2 transition-transform duration-300 transform ${isBudgetSheetOpen ? 'translate-y-0 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]' : 'translate-y-full'} ${isDarkMode ? 'bg-slate-900 border-t border-slate-800' : 'bg-slate-50 border-t border-slate-200'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Drag Handle */}
+          <div className="w-12 h-1.5 rounded-full bg-slate-300 dark:bg-slate-700 mx-auto mb-6" />
+
+          <div className="flex flex-col gap-4 max-h-[75vh] overflow-y-auto pr-1 custom-scrollbar">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="material-symbols-outlined text-[22px] text-blue-500">settings_accessibility</span>
+              <h2 className={`text-lg font-bold m-0 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>Budget Configuration</h2>
+            </div>
+
+            {/* Main Monthly Budget */}
+            <div className="flex flex-col gap-1.5">
+              <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Total Monthly Budget (RM)</label>
+              <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-950/80 border-slate-800 focus-within:border-blue-500' : 'bg-white border-slate-200 focus-within:border-blue-400'}`}>
+                <span className="text-sm font-bold opacity-60">RM</span>
+                <input 
+                  type="number"
+                  value={budgetLimit || ''}
+                  onChange={(e) => setBudgetLimit(parseFloat(e.target.value) || 0)}
+                  placeholder="3000"
+                  className={`w-full bg-transparent border-none outline-none text-sm p-0 font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}
+                />
+              </div>
+            </div>
+
+            <div className="h-px bg-slate-500/10 my-1" />
+            
+            {/* Category Budgets */}
+            <div className="flex flex-col gap-3">
+              <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Category Limits (Optional)</label>
+              
+              <div className="grid grid-cols-1 gap-2.5">
+                {CATEGORIES.map(cat => {
+                  const currentVal = categoryBudgets[cat.id] || '';
+                  return (
+                    <div 
+                      key={cat.id}
+                      className={`flex items-center justify-between p-3 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-950/40 border-slate-800/80' : 'bg-white border-slate-200/60 shadow-sm'}`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div 
+                          className="w-8 h-8 rounded-xl flex items-center justify-center border"
+                          style={{ 
+                            backgroundColor: isDarkMode ? `${cat.color}15` : `${cat.color}0D`,
+                            borderColor: isDarkMode ? `${cat.color}30` : `${cat.color}20`
+                          }}
+                        >
+                          <span className="material-symbols-outlined text-[16px]" style={{ color: cat.color }}>{cat.icon}</span>
+                        </div>
+                        <span className={`text-sm font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>{cat.label}</span>
+                      </div>
+                      
+                      <div className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border w-28 transition-all ${isDarkMode ? 'bg-slate-950/80 border-slate-800 focus-within:border-blue-500' : 'bg-slate-50 border-slate-200 focus-within:border-blue-400'}`}>
+                        <span className="text-xs font-bold opacity-50">RM</span>
+                        <input 
+                          type="number"
+                          value={currentVal}
+                          onChange={(e) => {
+                            const val = e.target.value ? parseFloat(e.target.value) : 0;
+                            setCategoryBudgets(prev => ({
+                              ...prev,
+                              [cat.id]: val
+                            }));
+                          }}
+                          placeholder="No Limit"
+                          className={`w-full bg-transparent border-none outline-none text-xs p-0 font-medium text-right ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="h-px bg-slate-500/10 my-1" />
+            
+            {/* Audio & Confetti Toggles */}
+            <div className="flex flex-col gap-2.5">
+              <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Preference Settings</label>
+              
+              <div className="flex flex-col gap-2">
+                {/* Audio Switch */}
+                <div className={`flex items-center justify-between p-3.5 rounded-2xl border ${isDarkMode ? 'bg-slate-950/40 border-slate-800/80' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                  <div className="flex items-center gap-2.5">
+                    <span className={`material-symbols-outlined text-[18px] ${soundEnabled ? 'text-indigo-500' : 'text-slate-400'}`}>
+                      {soundEnabled ? 'volume_up' : 'volume_off'}
+                    </span>
+                    <span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Sound Feedback Haptics</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { playHaptic('click'); setSoundEnabled(!soundEnabled); }}
+                    className={`w-11 h-6 rounded-full p-0.5 border-0 transition-all cursor-pointer flex items-center ${soundEnabled ? 'bg-blue-600 justify-end' : 'bg-slate-300 dark:bg-slate-800 justify-start'}`}
+                  >
+                    <div className="w-5 h-5 rounded-full bg-white shadow-sm" />
+                  </button>
+                </div>
+
+                {/* Confetti Switch */}
+                <div className={`flex items-center justify-between p-3.5 rounded-2xl border ${isDarkMode ? 'bg-slate-950/40 border-slate-800/80' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                  <div className="flex items-center gap-2.5">
+                    <span className={`material-symbols-outlined text-[18px] ${confettiEnabled ? 'text-amber-500' : 'text-slate-400'}`}>
+                      {confettiEnabled ? 'celebration' : 'sentiment_neutral'}
+                    </span>
+                    <span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Confetti Animations</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { playHaptic('click'); setConfettiEnabled(!confettiEnabled); }}
+                    className={`w-11 h-6 rounded-full p-0.5 border-0 transition-all cursor-pointer flex items-center ${confettiEnabled ? 'bg-blue-600 justify-end' : 'bg-slate-300 dark:bg-slate-800 justify-start'}`}
+                  >
+                    <div className="w-5 h-5 rounded-full bg-white shadow-sm" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="h-px bg-slate-500/10 my-1" />
+
+            {/* Quick Log Templates Customizer */}
+            <div className="flex flex-col gap-2.5">
+              <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Customize Quick Templates</label>
+              <div className="flex flex-col gap-2.5">
+                {quickTemplates.map((template, idx) => (
+                  <div 
+                    key={template.id}
+                    className={`flex flex-col gap-2.5 p-3.5 rounded-2xl border ${isDarkMode ? 'bg-slate-950/40 border-slate-800/80' : 'bg-white border-slate-200/60 shadow-sm'}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {/* Emoji input */}
+                      <input 
+                        type="text"
+                        value={template.emoji}
+                        maxLength={2}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setQuickTemplates(prev => prev.map((t, i) => i === idx ? { ...t, emoji: val } : t));
+                        }}
+                        className={`w-10 text-center py-1.5 rounded-xl border outline-none font-bold text-sm
+                                   ${isDarkMode ? 'bg-slate-950 border-slate-800 text-white focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-blue-400'}`}
+                      />
+                      
+                      {/* Title input */}
+                      <input 
+                        type="text"
+                        value={template.title}
+                        placeholder="Title"
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setQuickTemplates(prev => prev.map((t, i) => i === idx ? { ...t, title: val } : t));
+                        }}
+                        className={`flex-1 px-3 py-1.5 rounded-xl border outline-none text-xs font-semibold
+                                   ${isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-200 focus:border-blue-500' : 'bg-slate-50 border-slate-200 text-slate-700 focus:border-blue-400'}`}
+                      />
+
+                      {/* Amount input */}
+                      <div className={`flex items-center gap-0.5 px-2 py-1.5 rounded-xl border w-20 transition-all ${isDarkMode ? 'bg-slate-950 border-slate-800 focus-within:border-blue-500' : 'bg-slate-50 border-slate-200 focus-within:border-blue-400'}`}>
+                        <span className="text-[10px] font-bold opacity-50">RM</span>
+                        <input 
+                          type="number"
+                          value={template.amount || ''}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setQuickTemplates(prev => prev.map((t, i) => i === idx ? { ...t, amount: val } : t));
+                          }}
+                          className={`w-full bg-transparent border-none outline-none text-xs font-medium text-right ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Category Select */}
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold opacity-55">Category:</span>
+                      <select
+                        value={template.categoryId}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setQuickTemplates(prev => prev.map((t, i) => i === idx ? { ...t, categoryId: val } : t));
+                        }}
+                        className={`flex-1 px-2.5 py-1.5 rounded-xl border outline-none text-xs font-medium cursor-pointer
+                                   ${isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-300 focus:border-indigo-500' : 'bg-slate-50 border-slate-200 text-slate-600 focus:border-indigo-400'}`}
+                      >
+                        {CATEGORIES.map(cat => (
+                          <option key={cat.id} value={cat.id}>
+                            {cat.emoji} {cat.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="h-px bg-slate-500/10 my-1" />
+
+            {/* Data Management Section */}
+            <div className="flex flex-col gap-2.5">
+              <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Data Management & Portability</label>
+              <div className="grid grid-cols-2 gap-2.5">
+                {/* Export CSV */}
+                <button
+                  type="button"
+                  onClick={handleExportCSV}
+                  className={`py-3 px-4 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer outline-none hover:scale-[1.02] active:scale-[0.98]
+                             ${isDarkMode ? 'bg-slate-950/40 border-slate-800 hover:bg-slate-900 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm'}`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">download</span>
+                  Export CSV
+                </button>
+                
+                {/* Backup JSON */}
+                <button
+                  type="button"
+                  onClick={handleBackupJSON}
+                  className={`py-3 px-4 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer outline-none hover:scale-[1.02] active:scale-[0.98]
+                             ${isDarkMode ? 'bg-slate-950/40 border-slate-800 hover:bg-slate-900 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm'}`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">backup</span>
+                  Backup (JSON)
+                </button>
+                
+                {/* Restore JSON */}
+                <button
+                  type="button"
+                  onClick={() => { playHaptic('click'); restoreFileInputRef.current?.click(); }}
+                  className={`py-3 px-4 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer outline-none hover:scale-[1.02] active:scale-[0.98]
+                             ${isDarkMode ? 'bg-slate-950/40 border-slate-800 hover:bg-slate-900 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm'}`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">settings_backup_restore</span>
+                  Restore (JSON)
+                </button>
+
+                {/* Reset All */}
+                {expenses.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleResetExpenses}
+                    className={`py-3 px-4 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer outline-none hover:scale-[1.02] active:scale-[0.98] text-red-500 border-red-500/20 bg-red-500/5 hover:bg-red-500/10`}
+                  >
+                    <span className="material-symbols-outlined text-[16px]">refresh</span>
+                    Reset Data
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <button 
+              type="button"
+              onClick={() => { playHaptic('success'); triggerConfetti(); setIsBudgetSheetOpen(false); }}
+              className="w-full py-4 mt-3 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer border-0 outline-none bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/25 active:scale-[0.98]"
+            >
+              <span className="material-symbols-outlined text-[20px]">check_circle</span>
+              Save Configurations
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Receipt Crop & Preprocess Editor Modal */}
+      {isCropEditorOpen && rawImageToCrop && (
+        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-in fade-in">
+          {/* Header */}
+          <div className="text-center text-white mb-4">
+            <h3 className="text-lg font-bold mb-1">Crop Receipt</h3>
+            <p className="text-xs text-slate-400">Drag sliders to crop out background clutter</p>
+          </div>
+
+          {/* Visual Image Preview with Bounding Box Overlay */}
+          <div className="relative max-w-sm w-full bg-slate-900 border border-white/10 rounded-2xl overflow-hidden flex items-center justify-center max-h-[50vh]">
+            <img 
+              src={rawImageToCrop} 
+              alt="Raw scan" 
+              className="max-w-full max-h-[48vh] object-contain select-none opacity-90"
+            />
+            {/* Draggable/Visual overlay box shadows indicating dark borders outside cropped region */}
+            <div 
+              className="absolute pointer-events-none border-2 border-dashed border-indigo-500/80 shadow-[0_0_20px_rgba(99,102,241,0.5)]"
+              style={{
+                top: `${cropTop}%`,
+                bottom: `${cropBottom}%`,
+                left: `${cropLeft}%`,
+                right: `${cropRight}%`
+              }}
+            >
+              {/* Corner indicators */}
+              <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-indigo-400 -translate-x-0.5 -translate-y-0.5" />
+              <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-indigo-400 translate-x-0.5 -translate-y-0.5" />
+              <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-indigo-400 -translate-x-0.5 translate-y-0.5" />
+              <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-indigo-400 translate-x-0.5 translate-y-0.5" />
+            </div>
+            {/* Shading outside the crop area */}
+            <div className="absolute inset-0 bg-black/50 pointer-events-none" style={{ clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${cropLeft}% ${cropTop}%, ${100 - cropRight}% ${cropTop}%, ${100 - cropRight}% ${100 - cropBottom}%, ${cropLeft}% ${100 - cropBottom}%, ${cropLeft}% ${cropTop}%)` }} />
+          </div>
+
+          {/* Sliders Area */}
+          <div className="w-full max-w-sm flex flex-col gap-3 mt-4 px-4">
+            <div className="grid grid-cols-2 gap-3">
+              {/* Crop Top */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Crop Top: {cropTop}%</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="45" 
+                  value={cropTop} 
+                  onChange={(e) => setCropTop(parseInt(e.target.value))}
+                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+              </div>
+              {/* Crop Bottom */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Crop Bottom: {cropBottom}%</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="45" 
+                  value={cropBottom} 
+                  onChange={(e) => setCropBottom(parseInt(e.target.value))}
+                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+              </div>
+              {/* Crop Left */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Crop Left: {cropLeft}%</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="45" 
+                  value={cropLeft} 
+                  onChange={(e) => setCropLeft(parseInt(e.target.value))}
+                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+              </div>
+              {/* Crop Right */}
+              <div className="flex flex-col gap-1">
+                <span className="text-[10px] font-bold text-slate-400 uppercase">Crop Right: {cropRight}%</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="45" 
+                  value={cropRight} 
+                  onChange={(e) => setCropRight(parseInt(e.target.value))}
+                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 mt-3 w-full">
+              <button 
+                type="button"
+                onClick={() => { playHaptic('click'); setIsCropEditorOpen(false); setRawImageToCrop(null); }}
+                className="flex-1 py-3 rounded-xl font-bold text-xs bg-slate-800 text-white hover:bg-slate-700 transition-colors border-0 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                onClick={() => {
+                  playHaptic('success');
+                  const img = new Image();
+                  img.src = rawImageToCrop;
+                  img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    const x = img.width * (cropLeft / 100);
+                    const y = img.height * (cropTop / 100);
+                    const w = img.width * (1 - (cropLeft + cropRight) / 100);
+                    const h = img.height * (1 - (cropTop + cropBottom) / 100);
+                    
+                    // Downscale the saved receipt image to a reasonable size (max 1024px) to optimize IndexedDB storage and JSON exports
+                    const MAX_SAVE_DIM = 1024;
+                    let targetW = w;
+                    let targetH = h;
+                    if (targetW > targetH) {
+                      if (targetW > MAX_SAVE_DIM) {
+                        targetH = targetH * (MAX_SAVE_DIM / targetW);
+                        targetW = MAX_SAVE_DIM;
+                      }
+                    } else {
+                      if (targetH > MAX_SAVE_DIM) {
+                        targetW = targetW * (MAX_SAVE_DIM / targetH);
+                        targetH = MAX_SAVE_DIM;
+                      }
+                    }
+
+                    canvas.width = targetW;
+                    canvas.height = targetH;
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                      ctx.drawImage(img, x, y, w, h, 0, 0, targetW, targetH);
+                      const croppedUrl = canvas.toDataURL('image/jpeg', 0.8);
+                      processAndScanImage(croppedUrl);
+                    }
+                  };
+                }}
+                className="flex-[2] py-3 rounded-xl font-bold text-xs bg-indigo-600 text-white hover:bg-indigo-700 transition-colors border-0 cursor-pointer shadow-lg shadow-indigo-600/20"
+              >
+                Crop & Enhance (Scan)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confetti Overlay Canvas */}
+      <canvas 
+        ref={confettiCanvasRef} 
+        className="absolute inset-0 pointer-events-none z-50 rounded-[2.5rem]" 
+        style={{ width: '100%', height: '100%' }}
+      />
+
     </div>
   </div>
   );

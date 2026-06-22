@@ -53,7 +53,7 @@ self.addEventListener('fetch', (event) => {
           if (cachedResponse) return cachedResponse;
           
           // Fallback index.html for SPA routes
-          if (event.request.headers.get('accept').includes('text/html')) {
+          if (event.request.headers.get('accept')?.includes('text/html')) {
             return caches.match('/');
           }
         });

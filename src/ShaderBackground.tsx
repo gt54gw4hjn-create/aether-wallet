@@ -23,10 +23,9 @@ export default function ShaderBackground() {
     }
     syncSize();
 
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    const gl = (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) as WebGLRenderingContext | null;
     if (!gl) return;
 
-    // @ts-ignore
     const vs = `attribute vec2 a_position;
 varying vec2 v_texCoord;
 void main() {
@@ -60,50 +59,34 @@ void main() {
     gl_FragColor = vec4(finalColor, 0.7); // Low opacity for glass effect
 }`;
 
-    // @ts-ignore
-    function cs(type, src) {
-      // @ts-ignore
-      const s = gl.createShader(type);
-      // @ts-ignore
-      gl.shaderSource(s, src);
-      // @ts-ignore
-      gl.compileShader(s);
+    function cs(type: number, src: string): WebGLShader {
+      const s = gl!.createShader(type);
+      if (!s) throw new Error("Failed to create shader");
+      gl!.shaderSource(s, src);
+      gl!.compileShader(s);
       return s;
     }
 
-    // @ts-ignore
     const prog = gl.createProgram();
-    // @ts-ignore
+    if (!prog) return;
     gl.attachShader(prog, cs(gl.VERTEX_SHADER, vs));
-    // @ts-ignore
     gl.attachShader(prog, cs(gl.FRAGMENT_SHADER, fs));
-    // @ts-ignore
     gl.linkProgram(prog);
-    // @ts-ignore
     gl.useProgram(prog);
 
-    // @ts-ignore
     const buf = gl.createBuffer();
-    // @ts-ignore
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-    // @ts-ignore
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
 
-    // @ts-ignore
     const pos = gl.getAttribLocation(prog, 'a_position');
-    // @ts-ignore
     gl.enableVertexAttribArray(pos);
-    // @ts-ignore
     gl.vertexAttribPointer(pos, 2, gl.FLOAT, false, 0, 0);
 
-    // @ts-ignore
     const uTime = gl.getUniformLocation(prog, 'u_time');
-    // @ts-ignore
     const uRes = gl.getUniformLocation(prog, 'u_resolution');
-    // @ts-ignore
     const uMouse = gl.getUniformLocation(prog, 'u_mouse');
 
-    let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
+    const mouse = { x: canvas.width / 2, y: canvas.height / 2 };
     const handleMouseMove = (event: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       if (rect.width && rect.height) {
@@ -117,15 +100,10 @@ void main() {
 
     let animationFrameId: number;
     const render = (t: number) => {
-      // @ts-ignore
       gl.viewport(0, 0, canvas.width, canvas.height);
-      // @ts-ignore
       if (uTime) gl.uniform1f(uTime, t * 0.001);
-      // @ts-ignore
       if (uRes) gl.uniform2f(uRes, canvas.width, canvas.height);
-      // @ts-ignore
       if (uMouse) gl.uniform2f(uMouse, mouse.x, mouse.y);
-      // @ts-ignore
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       animationFrameId = requestAnimationFrame(render);
     };

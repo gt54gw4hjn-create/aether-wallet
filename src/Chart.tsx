@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, memo } from 'react';
 
 interface ChartProps {
   expenses: { amount: number; categoryId: string }[];
@@ -7,7 +7,7 @@ interface ChartProps {
   onCategoryClick?: (id: string) => void;
 }
 
-export default function DonutChart({ expenses, categories, filterCategory, onCategoryClick }: ChartProps) {
+const DonutChart = memo(function DonutChart({ expenses, categories, filterCategory, onCategoryClick }: ChartProps) {
   const data = useMemo(() => {
     const totals: Record<string, number> = {};
     let grandTotal = 0;
@@ -69,4 +69,6 @@ export default function DonutChart({ expenses, categories, filterCategory, onCat
       })}
     </svg>
   );
-}
+});
+
+export default DonutChart;
