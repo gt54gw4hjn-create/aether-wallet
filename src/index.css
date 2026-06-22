@@ -158,49 +158,7 @@ html, body {
   .badge-rose   { background: rgba(244,63,94,0.12);  color: #f43f5e; }
 }
 
-/* ─── Opening Animation ─────────────────────────────────────────────────────── */
-@keyframes drawCard   { from { stroke-dashoffset: 230; } to { stroke-dashoffset: 0; } }
-@keyframes drawStripe { from { stroke-dashoffset: 90;  } to { stroke-dashoffset: 0; } }
-@keyframes drawA      { from { stroke-dashoffset: 350; } to { stroke-dashoffset: 0; } }
-@keyframes drawChip   { from { stroke-dashoffset: 80;  } to { stroke-dashoffset: 0; } }
 
-@keyframes glowPulse {
-  0%, 100% { filter: drop-shadow(0 0 3px var(--glow-color)) drop-shadow(0 0 8px var(--glow-color)); }
-  50%      { filter: drop-shadow(0 0 8px var(--glow-color)) drop-shadow(0 0 20px var(--glow-color)); }
-}
-@keyframes radialPulse {
-  0%, 100% { transform: scale(1) translate(0px,0px); opacity: 0.4; }
-  50%      { transform: scale(1.15) translate(10px,-10px); opacity: 0.65; }
-}
-@keyframes shimmerSweep {
-  0%   { transform: translateX(-150%) rotate(30deg); }
-  100% { transform: translateX(150%) rotate(30deg); }
-}
-@keyframes cinematicLogoIn {
-  0%   { transform: scale(0.85); opacity: 0; }
-  100% { transform: scale(1); opacity: 1; }
-}
-@keyframes letterGlow {
-  0%   { opacity: 0; transform: translateY(10px) scale(0.95); letter-spacing: 0.15em; filter: blur(8px) brightness(0); }
-  60%  { opacity: 0.8; filter: blur(2px) brightness(1.6); }
-  100% { opacity: 1; transform: translateY(0) scale(1); letter-spacing: 0.45em; filter: blur(0) brightness(1); text-shadow: 0 0 12px rgba(6,182,212,0.5), 0 0 25px rgba(6,182,212,0.2); }
-}
-
-.trace-card     { --glow-color:#00f2fe; animation: drawCard   0.5s cubic-bezier(0.22,1,0.36,1) forwards, glowPulse 3s infinite ease-in-out; }
-.trace-stripe   { --glow-color:#818cf8; animation: drawStripe 0.4s cubic-bezier(0.22,1,0.36,1) forwards, glowPulse 3s infinite ease-in-out; animation-delay:0.1s,0.1s; }
-.trace-letter-a { --glow-color:#a855f7; animation: drawA      0.4s cubic-bezier(0.22,1,0.36,1) forwards, glowPulse 3s infinite ease-in-out; animation-delay:0.2s,0.2s; }
-.trace-chip     { --glow-color:#ffd700; animation: drawChip   0.3s cubic-bezier(0.22,1,0.36,1) forwards, glowPulse 3s infinite ease-in-out; animation-delay:0.3s,0.3s; }
-
-.animate-radial-pulse { animation: radialPulse 12s infinite ease-in-out; }
-
-.shimmer-active::after {
-  content:''; position:absolute; top:-50%; left:-50%; width:200%; height:200%;
-  background: linear-gradient(60deg, rgba(255,255,255,0) 30%, rgba(255,255,255,0.25) 45%, rgba(255,255,255,0.45) 50%, rgba(255,255,255,0.25) 55%, rgba(255,255,255,0) 70%);
-  animation: shimmerSweep 3s infinite ease-in-out;
-  pointer-events: none;
-}
-.cinematic-logo-container { animation: cinematicLogoIn 0.5s cubic-bezier(0.16,1,0.3,1) forwards; }
-.cinematic-text-fade      { opacity:0; animation: letterGlow 0.5s cubic-bezier(0.16,1,0.3,1) forwards; }
 
 /* ─── Legacy aliases (keep existing JSX working) ─────────────────────────────── */
 .glassmorph {
