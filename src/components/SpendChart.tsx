@@ -11,9 +11,10 @@ interface CatTotal {
 interface SpendChartProps {
   catTotals: CatTotal[];
   isDarkMode: boolean;
+  categoryBudgets?: Record<string, number>;
 }
 
-const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode }) => {
+const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode, categoryBudgets = {} }) => {
   const panelBg = isDarkMode ? 'rgba(30,41,59,0.55)' : 'rgba(255,255,255,0.6)';
   const panelBorder = isDarkMode ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
   const trackBg = isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
@@ -44,25 +45,38 @@ const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode }) => {
       {/* Bars */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
         {sorted.map((cat) => {
-          const pct = (cat.total / maxTotal) * 100;
+          const limit = categoryBudgets[cat.id] || 0;
+          const hasLimit = limit > 0;
+          const pct = hasLimit ? Math.min((cat.total / limit) * 100, 100) : (cat.total / maxTotal) * 100;
+          
+          // Color coding based on budget limits
+          const barColor = hasLimit
+            ? (cat.total >= limit ? '#ef4444' : cat.total >= limit * 0.8 ? '#f59e0b' : cat.color)
+            : cat.color;
+
           return (
             <div key={cat.id} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
               {/* Icon */}
               <div style={{
                 width: '28px', height: '28px', borderRadius: '8px',
-                background: cat.color + '22',
+                background: barColor + '22',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 flexShrink: 0,
               }}>
-                <span className="material-symbols-outlined" style={{ fontSize: '14px', color: cat.color }}>{cat.icon}</span>
+                <span className="material-symbols-outlined" style={{ fontSize: '14px', color: barColor }}>{cat.icon}</span>
               </div>
 
               {/* Label + bar */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
                   <span style={{ fontSize: '0.72rem', fontWeight: 600, color: valueColor }}>{cat.label}</span>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: cat.color }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: barColor }}>
                     RM{cat.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {hasLimit && (
+                      <span style={{ fontWeight: 500, fontSize: '0.65rem', opacity: 0.6, marginLeft: '3px' }}>
+                        / RM{limit.toLocaleString()}
+                      </span>
+                    )}
                   </span>
                 </div>
                 {/* Track */}
@@ -70,7 +84,7 @@ const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode }) => {
                   <div style={{
                     height: '5px', borderRadius: '99px',
                     width: `${pct}%`,
-                    background: cat.color,
+                    background: barColor,
                     transition: 'width 0.7s cubic-bezier(0.16,1,0.3,1)',
                   }} />
                 </div>

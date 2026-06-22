@@ -1300,6 +1300,7 @@ export default function App() {
               expenses={expenses}
               isDarkMode={isDarkMode}
               budgetLimit={budgetLimit}
+              categoryBudgets={categoryBudgets}
             >
               <div className="space-y-2">
                 {expenses.length === 0 ? null : expenses.map((exp, i) => renderExpenseItem(exp, i))}

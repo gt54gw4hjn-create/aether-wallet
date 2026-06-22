@@ -10,10 +10,11 @@ interface DashboardProps {
   expenses: Expense[];
   isDarkMode: boolean;
   budgetLimit: number;
+  categoryBudgets?: Record<string, number>;
   children?: React.ReactNode; // Full renderExpenseItem list passed from App
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ expenses, isDarkMode, budgetLimit, children }) => {
+const Dashboard: React.FC<DashboardProps> = ({ expenses, isDarkMode, budgetLimit, categoryBudgets, children }) => {
   const balance = calculateBalance(expenses);
 
   // ── Category totals for bar chart ─────────────────────────────────────────
@@ -102,7 +103,7 @@ const Dashboard: React.FC<DashboardProps> = ({ expenses, isDarkMode, budgetLimit
 
       {/* Category bar chart */}
       {catTotals.length > 0 && (
-        <SpendChart catTotals={catTotals} isDarkMode={isDarkMode} />
+        <SpendChart catTotals={catTotals} isDarkMode={isDarkMode} categoryBudgets={categoryBudgets} />
       )}
 
       {/* Full transaction list — rendered by App.tsx with all swipe/bulk features */}
