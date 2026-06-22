@@ -1153,14 +1153,17 @@ export default function App() {
              style={{ background: isDarkMode ? 'linear-gradient(180deg, rgba(7,10,20,0.95) 0%, transparent 100%)' : 'linear-gradient(180deg, rgba(240,238,255,0.95) 0%, transparent 100%)' }}>
           {/* Brand */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <div style={{
-              width: '32px', height: '32px', borderRadius: '10px',
-              background: 'linear-gradient(135deg, #4f46e5, #8b5cf6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 12px rgba(79,70,229,0.4)',
-            }}>
-              <span className="material-symbols-outlined" style={{ fontSize: '16px', color: '#fff', fontVariationSettings: "'FILL' 1" }}>account_balance_wallet</span>
-            </div>
+            <img 
+              src="/icon.png" 
+              alt="Timmy Wallet Logo" 
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(139,92,246,0.3)',
+                objectFit: 'contain'
+              }}
+            />
             <div>
               <h1 style={{
                 margin: 0, fontSize: '1rem', fontWeight: 800, letterSpacing: '-0.02em', lineHeight: 1.1,
