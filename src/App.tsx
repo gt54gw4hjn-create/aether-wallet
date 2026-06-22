@@ -1752,7 +1752,7 @@ export default function App() {
         onClick={() => { playHaptic('click'); setIsBottomSheetOpen(false); setScannedImage(null); }}
       >
         <div 
-          className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md rounded-t-[2rem] p-6 pt-2 transition-transform duration-300 transform ${isBottomSheetOpen ? 'translate-y-0 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]' : 'translate-y-full'} ${isDarkMode ? 'bg-slate-900 border-t border-slate-800' : 'bg-slate-50 border-t border-slate-200'}`}
+          className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md rounded-t-[2rem] p-6 pt-2 max-h-[85dvh] overflow-y-auto custom-scrollbar pb-10 transition-transform duration-300 transform ${isBottomSheetOpen ? 'translate-y-0 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]' : 'translate-y-full'} ${isDarkMode ? 'bg-slate-900 border-t border-slate-800' : 'bg-slate-50 border-t border-slate-200'}`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Drag Handle */}
