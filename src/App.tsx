@@ -4,6 +4,12 @@ import Dashboard from './components/Dashboard';
 
 import { CATEGORIES, type Expense, type Project, type QuickTemplate } from './types';
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
+
 // Formatter for currency
 const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('en-MY', { style: 'currency', currency: 'MYR' }).format(amount);
@@ -233,6 +239,29 @@ export default function App() {
     return saved ? JSON.parse(saved) : {};
   });
   const [isBudgetSheetOpen, setIsBudgetSheetOpen] = useState(false);
+
+  // PWA Install Prompt State
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+
+  useEffect(() => {
+    const handleBeforeInstall = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e as BeforeInstallPromptEvent);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    playHaptic('click');
+    await deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      console.log('User accepted PWA install');
+    }
+    setDeferredPrompt(null);
+  };
   const [newProjectBudget, setNewProjectBudget] = useState<string>('');
   const restoreFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -2390,6 +2419,48 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {/* V11.4: PWA Installation Status */}
+            <div className="flex flex-col gap-2.5">
+              <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>PWA Application Status</label>
+              
+              {(() => {
+                const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as Navigator & { standalone?: boolean }).standalone;
+                
+                if (isStandalone) {
+                  return (
+                    <div className={`p-3.5 rounded-2xl border flex items-center gap-2.5 text-xs font-semibold ${isDarkMode ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                      <span className="material-symbols-outlined text-[18px]">verified</span>
+                      <span>Running in Standalone App Mode</span>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="flex flex-col gap-2">
+                    {deferredPrompt ? (
+                      <button
+                        type="button"
+                        onClick={handleInstallApp}
+                        className="w-full py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border-0 outline-none bg-indigo-600 hover:bg-indigo-700 text-white shadow-md shadow-indigo-600/10 active:scale-[0.98]"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">install_mobile</span>
+                        Install Timmy Wallet App
+                      </button>
+                    ) : (
+                      <div className={`p-3.5 rounded-2xl border flex items-start gap-2.5 text-[11px] leading-normal ${isDarkMode ? 'bg-slate-950/40 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600 shadow-sm'}`}>
+                        <span className="material-symbols-outlined text-[16px] text-indigo-500 mt-0.5">info</span>
+                        <span>
+                          <strong>Web App Mode</strong>: To install Timmy Wallet as a standalone app, tap your browser's menu (or <span className="font-bold">Share</span> button on Safari) and select <span className="font-bold">"Add to Home Screen"</span>.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="h-px bg-slate-500/10 my-1" />
 
             <button 
               type="button"
