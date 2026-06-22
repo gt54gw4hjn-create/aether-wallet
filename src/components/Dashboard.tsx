@@ -2,23 +2,46 @@ import React from 'react';
 import BalanceCard from './BalanceCard';
 import SpendChart from './SpendChart';
 import InsightStrip from './InsightStrip';
+import TrendChart from './TrendChart';
 import { calculateBalance } from '../utils/balance';
-import { CATEGORIES } from '../types';
-import type { Expense } from '../types';
+import type { Category, Expense } from '../types';
 
 interface DashboardProps {
   expenses: Expense[];
   isDarkMode: boolean;
   budgetLimit: number;
   categoryBudgets?: Record<string, number>;
+  currency?: string;
+  categories?: Category[];
   children?: React.ReactNode; // Full renderExpenseItem list passed from App
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ expenses, isDarkMode, budgetLimit, categoryBudgets, children }) => {
+const Dashboard: React.FC<DashboardProps> = ({ 
+  expenses, 
+  isDarkMode, 
+  budgetLimit, 
+  categoryBudgets, 
+  currency = 'MYR',
+  categories = [],
+  children 
+}) => {
   const balance = calculateBalance(expenses);
 
+  const getCurrencySymbol = (code: string) => {
+    switch (code) {
+      case 'USD': return '$';
+      case 'EUR': return '€';
+      case 'SGD': return 'S$';
+      case 'GBP': return '£';
+      case 'JPY': return '¥';
+      case 'CNY': return '¥';
+      default: return 'RM';
+    }
+  };
+  const currencySymbol = getCurrencySymbol(currency);
+
   // ── Category totals for bar chart ─────────────────────────────────────────
-  const catTotals = CATEGORIES.map((cat) => ({
+  const catTotals = categories.map((cat) => ({
     ...cat,
     total: expenses
       .filter((e) => e.categoryId === cat.id)
@@ -89,6 +112,7 @@ const Dashboard: React.FC<DashboardProps> = ({ expenses, isDarkMode, budgetLimit
         budgetLimit={budgetLimit}
         budgetUsed={budgetUsed}
         isOverBudget={isOverBudget}
+        currencySymbol={currencySymbol}
       />
 
       {/* Insight tiles */}
@@ -98,12 +122,22 @@ const Dashboard: React.FC<DashboardProps> = ({ expenses, isDarkMode, budgetLimit
           peakDay={daySums[peakDayIdx] > 0 ? dayNames[peakDayIdx] : null}
           thisMonthTotal={mtdTotal}
           isDarkMode={isDarkMode}
+          currencySymbol={currencySymbol}
+        />
+      )}
+
+      {/* Historical Trend Chart */}
+      {expenses.length > 0 && (
+        <TrendChart
+          expenses={expenses}
+          isDarkMode={isDarkMode}
+          currencySymbol={currencySymbol}
         />
       )}
 
       {/* Category bar chart */}
       {catTotals.length > 0 && (
-        <SpendChart catTotals={catTotals} isDarkMode={isDarkMode} categoryBudgets={categoryBudgets} />
+        <SpendChart catTotals={catTotals} isDarkMode={isDarkMode} categoryBudgets={categoryBudgets} currencySymbol={currencySymbol} />
       )}
 
       {/* Full transaction list — rendered by App.tsx with all swipe/bulk features */}

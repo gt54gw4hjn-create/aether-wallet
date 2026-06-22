@@ -5,9 +5,10 @@ interface InsightStripProps {
   peakDay: string | null;
   thisMonthTotal: number;
   isDarkMode: boolean;
+  currencySymbol?: string;
 }
 
-const InsightStrip: React.FC<InsightStripProps> = ({ dailyAvg, peakDay, thisMonthTotal, isDarkMode }) => {
+const InsightStrip: React.FC<InsightStripProps> = ({ dailyAvg, peakDay, thisMonthTotal, isDarkMode, currencySymbol = 'RM' }) => {
   const panelBg = isDarkMode ? 'rgba(30,41,59,0.55)' : 'rgba(255,255,255,0.6)';
   const panelBorder = isDarkMode ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
   const labelColor = isDarkMode ? '#64748b' : '#94a3b8';
@@ -18,13 +19,13 @@ const InsightStrip: React.FC<InsightStripProps> = ({ dailyAvg, peakDay, thisMont
       icon: 'today',
       iconColor: '#6366f1',
       label: 'Daily Avg',
-      value: `RM${dailyAvg.toFixed(2)}`,
+      value: `${currencySymbol}${dailyAvg.toFixed(2)}`,
     },
     {
       icon: 'trending_up',
       iconColor: '#10b981',
       label: 'This Month',
-      value: `RM${thisMonthTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: `${currencySymbol}${thisMonthTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     },
     {
       icon: 'event',

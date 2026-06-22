@@ -12,9 +12,10 @@ interface SpendChartProps {
   catTotals: CatTotal[];
   isDarkMode: boolean;
   categoryBudgets?: Record<string, number>;
+  currencySymbol?: string;
 }
 
-const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode, categoryBudgets = {} }) => {
+const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode, categoryBudgets = {}, currencySymbol = 'RM' }) => {
   const panelBg = isDarkMode ? 'rgba(30,41,59,0.55)' : 'rgba(255,255,255,0.6)';
   const panelBorder = isDarkMode ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
   const trackBg = isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
@@ -71,10 +72,10 @@ const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode, category
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
                   <span style={{ fontSize: '0.72rem', fontWeight: 600, color: valueColor }}>{cat.label}</span>
                   <span style={{ fontSize: '0.72rem', fontWeight: 700, color: barColor }}>
-                    RM{cat.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {currencySymbol}{cat.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     {hasLimit && (
                       <span style={{ fontWeight: 500, fontSize: '0.65rem', opacity: 0.6, marginLeft: '3px' }}>
-                        / RM{limit.toLocaleString()}
+                        / {currencySymbol}{limit.toLocaleString()}
                       </span>
                     )}
                   </span>

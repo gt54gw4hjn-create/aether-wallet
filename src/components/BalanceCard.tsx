@@ -6,6 +6,7 @@ interface BalanceCardProps {
   budgetLimit: number;
   budgetUsed: number;      // 0–100
   isOverBudget: boolean;
+  currencySymbol?: string;
 }
 
 const BalanceCard: React.FC<BalanceCardProps> = ({
@@ -14,6 +15,7 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
   budgetLimit,
   budgetUsed,
   isOverBudget,
+  currencySymbol = 'RM',
 }) => {
   const safeBalance = typeof balance === 'number' && !isNaN(balance) ? balance : parseFloat(String(balance)) || 0;
   const intPart = safeBalance.toFixed(2).split('.')[0];
@@ -46,7 +48,7 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
 
       {/* Amount */}
       <div style={{ display:'flex', alignItems:'flex-end', gap:'2px', marginBottom:'1rem' }}>
-        <span style={{ fontSize:'1.1rem', fontWeight:600, color:'rgba(255,255,255,0.75)', marginBottom:'6px', marginRight:'2px' }}>RM</span>
+        <span style={{ fontSize:'1.1rem', fontWeight:600, color:'rgba(255,255,255,0.75)', marginBottom:'6px', marginRight:'2px' }}>{currencySymbol}</span>
         <span style={{ fontSize:'3rem', fontWeight:800, color:'#fff', letterSpacing:'-2px', lineHeight:1 }}>{intPart}</span>
         <span style={{ fontSize:'1.4rem', fontWeight:700, color:'rgba(255,255,255,0.8)', marginBottom:'5px' }}>.{decPart}</span>
       </div>
@@ -59,7 +61,7 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
               {isOverBudget ? '⚠️ Near limit' : 'Budget used'}
             </span>
             <span style={{ fontSize:'0.65rem', color:'rgba(255,255,255,0.75)', fontWeight:700 }}>
-              RM{remaining.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} left
+              {currencySymbol}{remaining.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} left
             </span>
           </div>
           {/* Track */}
@@ -72,8 +74,8 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
             }} />
           </div>
           <div style={{ display:'flex', justifyContent:'space-between', marginTop:'0.25rem' }}>
-            <span style={{ fontSize:'0.6rem', color:'rgba(255,255,255,0.45)' }}>RM0</span>
-            <span style={{ fontSize:'0.6rem', color:'rgba(255,255,255,0.45)' }}>RM{budgetLimit.toLocaleString()}</span>
+            <span style={{ fontSize:'0.6rem', color:'rgba(255,255,255,0.45)' }}>{currencySymbol}0</span>
+            <span style={{ fontSize:'0.6rem', color:'rgba(255,255,255,0.45)' }}>{currencySymbol}{budgetLimit.toLocaleString()}</span>
           </div>
         </div>
       )}

@@ -6,7 +6,7 @@ export interface Category {
   color: string;
 }
 
-export const CATEGORIES: Category[] = [
+export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'food', label: 'Food', icon: 'restaurant', emoji: '🍔', color: '#ff9500' }, 
   { id: 'coffee', label: 'Coffee', icon: 'local_cafe', emoji: '☕', color: '#a2845e' }, 
   { id: 'transport', label: 'Transit', icon: 'directions_car', emoji: '🚗', color: '#34c759' }, 

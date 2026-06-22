@@ -1,18 +1,35 @@
-import { useState, useEffect, useRef } from 'react';
+﻿import { useState, useEffect, useRef } from 'react';
 import { saveReceipt, getReceipt, deleteReceipt, getAllReceipts, restoreReceipts } from './db';
 import Dashboard from './components/Dashboard';
 
-import { CATEGORIES, type Expense, type Project, type QuickTemplate } from './types';
+import { DEFAULT_CATEGORIES, type Category, type Expense, type Project, type QuickTemplate } from './types';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
+// Currency configurations
+const CURRENCIES = [
+  { code: 'MYR', symbol: 'RM', locale: 'en-MY' },
+  { code: 'USD', symbol: '$', locale: 'en-US' },
+  { code: 'EUR', symbol: 'â‚¬', locale: 'de-DE' },
+  { code: 'SGD', symbol: 'S$', locale: 'en-SG' },
+  { code: 'GBP', symbol: 'Â£', locale: 'en-GB' },
+  { code: 'JPY', symbol: 'Â¥', locale: 'ja-JP' },
+  { code: 'CNY', symbol: 'Â¥', locale: 'zh-CN' }
+];
+
+const getCurrencySymbol = (code: string) => {
+  const match = CURRENCIES.find(c => c.code === code);
+  return match ? match.symbol : 'RM';
+};
 
 // Formatter for currency
-const formatCurrency = (amount: number) => {
-  return new Intl.NumberFormat('en-MY', { style: 'currency', currency: 'MYR' }).format(amount);
+const formatCurrency = (amount: number, code: string = 'MYR') => {
+  const match = CURRENCIES.find(c => c.code === code);
+  const locale = match ? match.locale : 'en-MY';
+  return new Intl.NumberFormat(locale, { style: 'currency', currency: code }).format(amount);
 };
 
 // Helper to format 24h time string (e.g. "18:15") to 12h format (e.g. "6:15 PM")
@@ -240,6 +257,27 @@ export default function App() {
   });
   const [isBudgetSheetOpen, setIsBudgetSheetOpen] = useState(false);
 
+  // Dynamic categories state
+  const [categories, setCategories] = useState<Category[]>(() => {
+    const saved = localStorage.getItem('timmy_wallet_categories');
+    return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
+  });
+
+  // Category customization UI state
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatEmoji, setNewCatEmoji] = useState('âœ¨');
+  const [newCatColor, setNewCatColor] = useState('#8e8e93');
+  const [newCatIcon, setNewCatIcon] = useState('more_horiz');
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editCatName, setEditCatName] = useState('');
+  const [editCatEmoji, setEditCatEmoji] = useState('');
+  const [editCatColor, setEditCatColor] = useState('');
+
+  // Currency selection state
+  const [currency, setCurrency] = useState<string>(() => {
+    return localStorage.getItem('timmy_wallet_currency') || 'MYR';
+  });
+
   // PWA Install Prompt State
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
 
@@ -264,16 +302,17 @@ export default function App() {
   };
   const [newProjectBudget, setNewProjectBudget] = useState<string>('');
   const restoreFileInputRef = useRef<HTMLInputElement>(null);
+  const importCsvInputRef = useRef<HTMLInputElement>(null);
 
   // V7: Quick Templates, Bulk Mode, and Insights toggles
   const [quickTemplates, setQuickTemplates] = useState<QuickTemplate[]>(() => {
     const saved = localStorage.getItem('micro_templates');
     if (saved) return JSON.parse(saved);
     return [
-      { id: 't1', emoji: '☕', title: 'Coffee', amount: 12, categoryId: 'coffee' },
-      { id: 't2', emoji: '🚗', title: 'Transit', amount: 20, categoryId: 'transport' },
-      { id: 't3', emoji: '🍔', title: 'Lunch', amount: 15, categoryId: 'food' },
-      { id: 't4', emoji: '🛍️', title: 'Shopping', amount: 50, categoryId: 'shopping' },
+      { id: 't1', emoji: 'â˜•', title: 'Coffee', amount: 12, categoryId: 'coffee' },
+      { id: 't2', emoji: 'ðŸš—', title: 'Transit', amount: 20, categoryId: 'transport' },
+      { id: 't3', emoji: 'ðŸ”', title: 'Lunch', amount: 15, categoryId: 'food' },
+      { id: 't4', emoji: 'ðŸ›ï¸', title: 'Shopping', amount: 50, categoryId: 'shopping' },
     ];
   });
   const [isBulkMode, setIsBulkMode] = useState(false);
@@ -323,6 +362,12 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('micro_templates', JSON.stringify(quickTemplates));
   }, [quickTemplates]);
+  useEffect(() => {
+    localStorage.setItem('timmy_wallet_categories', JSON.stringify(categories));
+  }, [categories]);
+  useEffect(() => {
+    localStorage.setItem('timmy_wallet_currency', currency);
+  }, [currency]);
   useEffect(() => {
     localStorage.setItem('micro_theme', isDarkMode ? 'dark' : 'light');
     if (isDarkMode) {
@@ -489,7 +534,7 @@ export default function App() {
       if (parsed.date) setDateInput(parsed.date);
       if (parsed.time) setTimeInput(parsed.time);
       if (parsed.category) {
-        const cat = CATEGORIES.find(c => c.id === parsed.category.toLowerCase());
+        const cat = categories.find(c => c.id === parsed.category.toLowerCase());
         if (cat) setSelectedCategory(cat.id);
       }
 
@@ -544,7 +589,7 @@ export default function App() {
     e.preventDefault();
     if (!amountInput || parseFloat(amountInput) <= 0) return;
 
-    const cat = CATEGORIES.find(c => c.id === selectedCategory);
+    const cat = categories.find(c => c.id === selectedCategory);
     const finalTitle = titleInput.trim() || cat?.label || 'Expense';
 
     const [year, month, day] = dateInput.split('-');
@@ -727,7 +772,7 @@ export default function App() {
   };
 
   const renderExpenseItem = (exp: Expense, index: number) => {
-    const category = CATEGORIES.find(c => c.id === exp.categoryId) || CATEGORIES[5];
+    const category = categories.find(c => c.id === exp.categoryId) || categories.find(c => c.id === 'other') || categories[categories.length - 1];
     const isEditingThis = editingId === exp.id;
     const isSwiped = swipeActiveId === exp.id;
     const translateStyle = !isBulkMode && isSwiped ? `translateX(${swipeDistance}px)` : 'translateX(0)';
@@ -884,13 +929,13 @@ export default function App() {
                 <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{category.label}</span>
                 {exp.time && (
                   <>
-                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>•</span>
+                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>â€¢</span>
                     <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{formatTime12h(exp.time)}</span>
                   </>
                 )}
                 {exp.scopeType && exp.scopeType !== 'one-off' && (
                   <>
-                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>•</span>
+                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>â€¢</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold transition-colors
                                      ${exp.scopeType === 'weekly' 
                                        ? (isDarkMode ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-amber-50 text-amber-700 border border-amber-200') 
@@ -910,7 +955,7 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className={`text-base font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>-{formatCurrency(exp.amount)}</span>
+            <span className={`text-base font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>-{formatCurrency(exp.amount, currency)}</span>
             {!isBulkMode && (
               <button 
                 onClick={(e) => handleDeleteExpense(exp.id, e)}
@@ -951,6 +996,75 @@ export default function App() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleImportCSV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (importCsvInputRef.current) importCsvInputRef.current.value = '';
+
+    try {
+      const text = await file.text();
+      const lines = text.split(/\r?\n/);
+      if (lines.length <= 1) {
+        throw new Error("CSV file is empty or only contains headers.");
+      }
+
+      const importedExpenses: Expense[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        const fields: string[] = [];
+        let currentField = '';
+        let insideQuotes = false;
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"') {
+            insideQuotes = !insideQuotes;
+          } else if (char === ',' && !insideQuotes) {
+            fields.push(currentField.trim());
+            currentField = '';
+          } else {
+            currentField += char;
+          }
+        }
+        fields.push(currentField.trim());
+
+        if (fields.length < 4) continue;
+
+        const [dateVal, titleVal, catIdVal, amountVal] = fields;
+        const parsedAmount = parseFloat(amountVal);
+        if (isNaN(parsedAmount) || parsedAmount < 0) continue;
+
+        const matchedCat = categories.find(c => c.id === catIdVal.toLowerCase() || c.label.toLowerCase() === catIdVal.toLowerCase());
+        const categoryId = matchedCat ? matchedCat.id : 'other';
+
+        importedExpenses.push({
+          id: 'exp_' + Math.random().toString(36).substring(2, 11),
+          title: titleVal || 'Imported Expense',
+          amount: parsedAmount,
+          date: dateVal || new Date().toISOString().split('T')[0],
+          categoryId,
+          scopeType: 'one-off'
+        });
+      }
+
+      if (importedExpenses.length === 0) {
+        throw new Error("No valid transactions found in the CSV file.");
+      }
+
+      const confirmImport = confirm(`Successfully parsed ${importedExpenses.length} transactions. Do you want to merge them into your current expenses?`);
+      if (confirmImport) {
+        setExpenses(prev => [...prev, ...importedExpenses]);
+        playHaptic('success');
+        triggerConfetti();
+        alert(`${importedExpenses.length} transactions imported successfully!`);
+      }
+    } catch (err: unknown) {
+      alert("CSV Import failed: " + (err instanceof Error ? err.message : String(err)));
+    }
   };
 
   const handleBackupJSON = async () => {
@@ -1065,7 +1179,7 @@ export default function App() {
           categoryId?: string;
         }>).map((t, index) => ({
           id: String(t.id || `t-${index}-${Math.random().toString(36).substring(2, 9)}`),
-          emoji: String(t.emoji || '✨'),
+          emoji: String(t.emoji || 'âœ¨'),
           title: String(t.title || 'Template'),
           amount: Math.max(0, parseFloat(String(t.amount)) || 0),
           categoryId: String(t.categoryId || 'other'),
@@ -1242,6 +1356,13 @@ export default function App() {
           onChange={handleRestoreJSON}
           className="hidden"
         />
+        <input
+          type="file"
+          accept=".csv"
+          ref={importCsvInputRef}
+          onChange={handleImportCSV}
+          className="hidden"
+        />
 
         {/* Scrollable Content Area */}
         <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col w-full relative">
@@ -1301,6 +1422,8 @@ export default function App() {
               isDarkMode={isDarkMode}
               budgetLimit={budgetLimit}
               categoryBudgets={categoryBudgets}
+              currency={currency}
+              categories={categories}
             >
               <div className="space-y-2">
                 {expenses.length === 0 ? null : expenses.map((exp, i) => renderExpenseItem(exp, i))}
@@ -1350,7 +1473,7 @@ export default function App() {
                       <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Weekly</span>
                     </div>
                     <div className="mt-2">
-                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(weeklyTotal)}</span>
+                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(weeklyTotal, currency)}</span>
                       <p className={`text-[10px] m-0 mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{weeklyItems.length} recurring items</p>
                     </div>
                   </div>
@@ -1362,7 +1485,7 @@ export default function App() {
                       <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Monthly</span>
                     </div>
                     <div className="mt-2">
-                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(monthlyTotal)}</span>
+                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(monthlyTotal, currency)}</span>
                       <p className={`text-[10px] m-0 mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{monthlyItems.length} recurring items</p>
                     </div>
                   </div>
@@ -1410,7 +1533,7 @@ export default function App() {
                           {/* Dot Indicators */}
                           <div className="flex gap-0.5 justify-center mt-0.5 h-1">
                             {dues.slice(0, 3).map((due, dIdx) => {
-                              const cat = CATEGORIES.find(c => c.id === due.categoryId) || CATEGORIES[5];
+                              const cat = categories.find(c => c.id === due.categoryId) || categories.find(c => c.id === 'other') || categories[categories.length - 1];
                               return (
                                 <div 
                                   key={dIdx} 
@@ -1522,7 +1645,7 @@ export default function App() {
                       <div className="flex items-center gap-2 mb-1">
                         <span className="material-symbols-outlined text-[20px] text-cyan-500 animate-pulse">folder</span>
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                          {typeof project.budget === 'number' && project.budget > 0 ? `Project Cost / Budget RM${project.budget}` : 'Project Cost'}
+                          {typeof project.budget === 'number' && project.budget > 0 ? `Project Cost / Budget ${getCurrencySymbol(currency)}${project.budget}` : 'Project Cost'}
                         </span>
                       </div>
                       <h2 className={`text-xl font-bold tracking-tight m-0 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{project.name}</h2>
@@ -1536,13 +1659,13 @@ export default function App() {
                           <div className="flex justify-between items-center text-[10px] font-bold opacity-60">
                             <span>Cost Progress</span>
                             <span className={isProjOver ? 'text-red-500' : ''}>
-                              {formatCurrency(projectTotal)} / {formatCurrency(project.budget)} ({projPercent.toFixed(0)}%)
+                              {formatCurrency(projectTotal, currency)} / {formatCurrency(project.budget, currency)} ({projPercent.toFixed(0)}%)
                             </span>
                           </div>
                           <div className={`w-full h-1.5 rounded-full overflow-hidden ${isDarkMode ? 'bg-slate-800' : 'bg-slate-100'}`}>
                             <div 
-                              className={`h-full rounded-full transition-all duration-500 ${isProjOver ? 'bg-red-500' : 'bg-cyan-500'}`}
-                              style={{ width: `${projPercent}%` }}
+                                className={`h-full rounded-full transition-all duration-500 ${isProjOver ? 'bg-red-500' : 'bg-cyan-500'}`}
+                                style={{ width: `${projPercent}%` }}
                             />
                           </div>
                         </div>
@@ -1552,7 +1675,7 @@ export default function App() {
                     {(!project.budget || project.budget <= 0) && (
                       <div className="mt-2 pt-4 border-t border-slate-500/10 flex items-end justify-between">
                         <span className={`text-[11px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>Accumulated Expense</span>
-                        <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(projectTotal)}</span>
+                        <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(projectTotal, currency)}</span>
                       </div>
                     )}
                   </div>
@@ -1659,12 +1782,12 @@ export default function App() {
                                   <span className={`text-[15px] font-semibold transition-colors group-hover:text-blue-500 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{proj.name}</span>
                                   <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                     {projExpenses.length} expenses
-                                    {typeof proj.budget === 'number' && proj.budget > 0 && ` • Budget RM${proj.budget}`}
+                                    {typeof proj.budget === 'number' && proj.budget > 0 && ` â€¢ Budget ${getCurrencySymbol(currency)}${proj.budget}`}
                                   </span>
                                 </div>
                               </div>
                               <div className="flex items-center gap-3">
-                                <span className={`text-base font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{formatCurrency(projTotal)}</span>
+                                <span className={`text-base font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{formatCurrency(projTotal, currency)}</span>
                                 <span className={`material-symbols-outlined text-slate-400 transition-transform group-hover:translate-x-0.5`}>chevron_right</span>
                               </div>
                             </div>
@@ -1761,7 +1884,7 @@ export default function App() {
           {isBatchCategoryOpen && selectedExpenseIds.length > 0 && (
             <div className={`mt-2 p-3 rounded-xl border grid grid-cols-3 gap-2 animate-in fade-in zoom-in-95 duration-200
                             ${isDarkMode ? 'bg-slate-900 border-slate-800' : 'bg-slate-50 border-slate-200'}`}>
-              {CATEGORIES.map(cat => (
+              {categories.map(cat => (
                 <button
                   key={cat.id}
                   onClick={() => handleBatchChangeCategory(cat.id)}
@@ -1809,7 +1932,7 @@ export default function App() {
                   </span>
                 )}
                 <div className="flex items-baseline gap-2">
-                  <span className={`text-3xl font-bold ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>RM</span>
+                  <span className={`text-3xl font-bold ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>{getCurrencySymbol(currency)}</span>
                   <input 
                     type="text" 
                     value={amountInput}
@@ -1898,7 +2021,7 @@ export default function App() {
               {/* Category Selector */}
               <div className="w-full overflow-x-auto pb-2 custom-scrollbar mask-linear-x">
                 <div className="flex items-center gap-2 px-2 w-max mx-auto">
-                  {CATEGORIES.map(cat => {
+                  {categories.map(cat => {
                     const isSelected = selectedCategory === cat.id;
                     return (
                       <button
@@ -2186,9 +2309,9 @@ export default function App() {
 
             {/* Main Monthly Budget */}
             <div className="flex flex-col gap-1.5">
-              <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Total Monthly Budget (RM)</label>
+              <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Total Monthly Budget ({getCurrencySymbol(currency)})</label>
               <div className={`flex items-center gap-2 px-4 py-3 rounded-2xl border transition-all ${isDarkMode ? 'bg-slate-950/80 border-slate-800 focus-within:border-blue-500' : 'bg-white border-slate-200 focus-within:border-blue-400'}`}>
-                <span className="text-sm font-bold opacity-60">RM</span>
+                <span className="text-sm font-bold opacity-60">{getCurrencySymbol(currency)}</span>
                 <input 
                   type="number"
                   value={budgetLimit || ''}
@@ -2206,7 +2329,7 @@ export default function App() {
               <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Category Limits (Optional)</label>
               
               <div className="grid grid-cols-1 gap-2.5">
-                {CATEGORIES.map(cat => {
+                {categories.map(cat => {
                   const currentVal = categoryBudgets[cat.id] || '';
                   return (
                     <div 
@@ -2227,7 +2350,7 @@ export default function App() {
                       </div>
                       
                       <div className={`flex items-center gap-1 px-3 py-1.5 rounded-xl border w-28 transition-all ${isDarkMode ? 'bg-slate-950/80 border-slate-800 focus-within:border-blue-500' : 'bg-slate-50 border-slate-200 focus-within:border-blue-400'}`}>
-                        <span className="text-xs font-bold opacity-50">RM</span>
+                        <span className="text-xs font-bold opacity-50">{getCurrencySymbol(currency)}</span>
                         <input 
                           type="number"
                           value={currentVal}
@@ -2255,6 +2378,28 @@ export default function App() {
               <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Preference Settings</label>
               
               <div className="flex flex-col gap-2">
+                {/* Currency Selector */}
+                <div className={`flex items-center justify-between p-3.5 rounded-2xl border ${isDarkMode ? 'bg-slate-950/40 border-slate-800/80' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                  <div className="flex items-center gap-2.5">
+                    <span className="material-symbols-outlined text-[18px] text-emerald-500">
+                      payments
+                    </span>
+                    <span className={`text-xs font-semibold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Primary Currency</span>
+                  </div>
+                  <select
+                    value={currency}
+                    onChange={(e) => { playHaptic('click'); setCurrency(e.target.value); }}
+                    className={`px-3 py-1 rounded-xl border outline-none text-xs font-medium cursor-pointer
+                               ${isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-300 focus:border-indigo-500' : 'bg-slate-50 border-slate-200 text-slate-600 focus:border-indigo-400'}`}
+                  >
+                    {CURRENCIES.map(c => (
+                      <option key={c.code} value={c.code}>
+                        {c.code} ({c.symbol})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 {/* Audio Switch */}
                 <div className={`flex items-center justify-between p-3.5 rounded-2xl border ${isDarkMode ? 'bg-slate-950/40 border-slate-800/80' : 'bg-white border-slate-200/60 shadow-sm'}`}>
                   <div className="flex items-center gap-2.5">
@@ -2331,7 +2476,7 @@ export default function App() {
 
                       {/* Amount input */}
                       <div className={`flex items-center gap-0.5 px-2 py-1.5 rounded-xl border w-20 transition-all ${isDarkMode ? 'bg-slate-950 border-slate-800 focus-within:border-blue-500' : 'bg-slate-50 border-slate-200 focus-within:border-blue-400'}`}>
-                        <span className="text-[10px] font-bold opacity-50">RM</span>
+                        <span className="text-[10px] font-bold opacity-50">{getCurrencySymbol(currency)}</span>
                         <input 
                           type="number"
                           value={template.amount || ''}
@@ -2356,7 +2501,7 @@ export default function App() {
                         className={`flex-1 px-2.5 py-1.5 rounded-xl border outline-none text-xs font-medium cursor-pointer
                                    ${isDarkMode ? 'bg-slate-950 border-slate-800 text-slate-300 focus:border-indigo-500' : 'bg-slate-50 border-slate-200 text-slate-600 focus:border-indigo-400'}`}
                       >
-                        {CATEGORIES.map(cat => (
+                        {categories.map(cat => (
                           <option key={cat.id} value={cat.id}>
                             {cat.emoji} {cat.label}
                           </option>
@@ -2383,6 +2528,17 @@ export default function App() {
                 >
                   <span className="material-symbols-outlined text-[16px]">download</span>
                   Export CSV
+                </button>
+
+                {/* Import CSV */}
+                <button
+                  type="button"
+                  onClick={() => { playHaptic('click'); importCsvInputRef.current?.click(); }}
+                  className={`py-3 px-4 rounded-2xl border text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer outline-none hover:scale-[1.02] active:scale-[0.98]
+                             ${isDarkMode ? 'bg-slate-950/40 border-slate-800 hover:bg-slate-900 text-slate-300' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-700 shadow-sm'}`}
+                >
+                  <span className="material-symbols-outlined text-[16px]">upload</span>
+                  Import CSV
                 </button>
                 
                 {/* Backup JSON */}
@@ -2420,6 +2576,188 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            <div className="h-px bg-slate-500/10 my-1" />
+
+            {/* Category Customization Section */}
+            {(() => {
+              const PRESET_COLORS = ['#ff9500','#a2845e','#34c759','#007aff','#af52de','#ff3b30','#ff6b35','#5ac8fa','#4cd964','#ffcc00','#8e8e93','#636366'];
+              const PRESET_EMOJIS = ['ðŸ”','â˜•','ðŸš—','ðŸ›ï¸','ðŸŽ®','âœ¨','ðŸ’Š','ðŸ“š','ðŸ ','ðŸ’¡','ðŸŽµ','âœˆï¸','ðŸ’°','ðŸŽ','ðŸ•','ðŸ‹ï¸','ðŸ¶','ðŸŒ¿','âš¡','ðŸŽ¨'];
+              const PRESET_ICONS = ['restaurant','local_cafe','directions_car','shopping_bag','sports_esports','more_horiz','medical_services','menu_book','home','bolt','music_note','flight','savings','card_giftcard','local_pizza','fitness_center','pets','eco','electric_bolt','palette'];
+
+              const handleAddCategory = () => {
+                if (!newCatName.trim()) return;
+                const newId = 'cat_' + Date.now().toString(36);
+                const newCat = { id: newId, label: newCatName.trim(), icon: newCatIcon, emoji: newCatEmoji, color: newCatColor };
+                setCategories(prev => [...prev, newCat]);
+                setNewCatName('');
+                playHaptic('success');
+              };
+
+              const handleDeleteCategory = (catId: string) => {
+                if (catId === 'other') { alert('The "Other" category cannot be deleted.'); return; }
+                if (!confirm('Delete this category? All expenses assigned to it will be moved to "Other".')) return;
+                setCategories(prev => prev.filter(c => c.id !== catId));
+                setExpenses(prev => prev.map(exp => exp.categoryId === catId ? { ...exp, categoryId: 'other' } : exp));
+                playHaptic('click');
+              };
+
+              const handleStartEdit = (cat: { id: string; label: string; emoji: string; color: string }) => {
+                setEditingCatId(cat.id);
+                setEditCatName(cat.label);
+                setEditCatEmoji(cat.emoji);
+                setEditCatColor(cat.color);
+              };
+
+              const handleSaveEdit = () => {
+                if (!editCatName.trim() || !editingCatId) return;
+                setCategories(prev => prev.map(c => c.id === editingCatId ? { ...c, label: editCatName.trim(), emoji: editCatEmoji, color: editCatColor } : c));
+                setEditingCatId(null);
+                playHaptic('success');
+              };
+
+              return (
+                <div className="flex flex-col gap-3">
+                  <label className={`text-xs font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Category Management</label>
+
+                  {/* Existing categories list */}
+                  <div className="flex flex-col gap-2">
+                    {categories.map(cat => (
+                      <div key={cat.id} className={`rounded-2xl border overflow-hidden transition-all ${isDarkMode ? 'bg-slate-950/40 border-slate-800/80' : 'bg-white border-slate-200/60 shadow-sm'}`}>
+                        {editingCatId === cat.id ? (
+                          <div className="flex flex-col gap-2 p-3">
+                            <input
+                              value={editCatName}
+                              onChange={e => setEditCatName(e.target.value)}
+                              className={`px-3 py-2 rounded-xl border outline-none text-sm font-medium w-full ${isDarkMode ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
+                              placeholder="Category name"
+                            />
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold opacity-60">Emoji:</span>
+                              <div className="flex flex-wrap gap-1 flex-1">
+                                {PRESET_EMOJIS.slice(0, 10).map(em => (
+                                  <button key={em} type="button" onClick={() => setEditCatEmoji(em)}
+                                    className={`text-base w-7 h-7 rounded-lg border-0 cursor-pointer transition-all ${editCatEmoji === em ? 'bg-indigo-500/20 scale-110' : 'bg-transparent'}`}>
+                                    {em}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold opacity-60">Color:</span>
+                              <div className="flex flex-wrap gap-1.5 flex-1">
+                                {PRESET_COLORS.map(clr => (
+                                  <button key={clr} type="button" onClick={() => setEditCatColor(clr)}
+                                    className={`w-6 h-6 rounded-full border-2 cursor-pointer transition-all ${editCatColor === clr ? 'border-white scale-110 shadow-md' : 'border-transparent'}`}
+                                    style={{ backgroundColor: clr }} />
+                                ))}
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button type="button" onClick={handleSaveEdit}
+                                className="flex-1 py-2 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white border-0 cursor-pointer transition-all">
+                                Save
+                              </button>
+                              <button type="button" onClick={() => setEditingCatId(null)}
+                                className={`flex-1 py-2 rounded-xl text-xs font-bold border cursor-pointer transition-all ${isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-300' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between px-3 py-2.5">
+                            <div className="flex items-center gap-2.5">
+                              <div className="w-8 h-8 rounded-xl flex items-center justify-center text-base"
+                                style={{ backgroundColor: `${cat.color}20` }}>
+                                {cat.emoji}
+                              </div>
+                              <span className={`text-sm font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-700'}`}>{cat.label}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button type="button" onClick={() => handleStartEdit(cat)}
+                                className={`p-1.5 rounded-lg border-0 bg-transparent cursor-pointer transition-colors ${isDarkMode ? 'text-slate-400 hover:text-indigo-400 hover:bg-slate-800' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}>
+                                <span className="material-symbols-outlined text-[16px]">edit</span>
+                              </button>
+                              {cat.id !== 'other' && (
+                                <button type="button" onClick={() => handleDeleteCategory(cat.id)}
+                                  className={`p-1.5 rounded-lg border-0 bg-transparent cursor-pointer transition-colors ${isDarkMode ? 'text-slate-400 hover:text-red-400 hover:bg-red-950/30' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}>
+                                  <span className="material-symbols-outlined text-[16px]">delete</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Add new category form */}
+                  <div className={`rounded-2xl border p-3 flex flex-col gap-2.5 ${isDarkMode ? 'bg-slate-950/40 border-slate-800/80 border-dashed' : 'bg-slate-50/80 border-slate-300 border-dashed'}`}>
+                    <p className={`text-xs font-bold uppercase tracking-wider m-0 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Add New Category</p>
+                    <input
+                      value={newCatName}
+                      onChange={e => setNewCatName(e.target.value)}
+                      placeholder="Category name (e.g. Bills)"
+                      className={`px-3 py-2 rounded-xl border outline-none text-sm font-medium w-full ${isDarkMode ? 'bg-slate-900 border-slate-700 text-slate-200 placeholder:text-slate-600' : 'bg-white border-slate-200 text-slate-700 placeholder:text-slate-400'}`}
+                    />
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold opacity-60 shrink-0">Emoji:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {PRESET_EMOJIS.map(em => (
+                          <button key={em} type="button" onClick={() => setNewCatEmoji(em)}
+                            className={`text-base w-7 h-7 rounded-lg border-0 cursor-pointer transition-all ${newCatEmoji === em ? 'bg-indigo-500/20 scale-110' : 'bg-transparent'}`}>
+                            {em}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold opacity-60 shrink-0">Icon:</span>
+                      <div className="flex flex-wrap gap-1 overflow-x-auto">
+                        {PRESET_ICONS.map((ic) => (
+                          <button key={ic} type="button" onClick={() => setNewCatIcon(ic)}
+                            className={`w-8 h-8 rounded-xl flex items-center justify-center border cursor-pointer transition-all ${
+                              newCatIcon === ic
+                                ? 'bg-indigo-600 border-indigo-600 text-white scale-105'
+                                : (isDarkMode ? 'bg-slate-800 border-slate-700 text-slate-400' : 'bg-white border-slate-200 text-slate-500')
+                            }`}>
+                            <span className="material-symbols-outlined text-[16px]">{ic}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold opacity-60 shrink-0">Color:</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {PRESET_COLORS.map(clr => (
+                          <button key={clr} type="button" onClick={() => setNewCatColor(clr)}
+                            className={`w-6 h-6 rounded-full border-2 cursor-pointer transition-all ${newCatColor === clr ? 'border-white scale-110 shadow-md' : 'border-transparent'}`}
+                            style={{ backgroundColor: clr }} />
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-xl flex-1" style={{ backgroundColor: `${newCatColor}15`, border: `1.5px solid ${newCatColor}40` }}>
+                        <span className="text-base">{newCatEmoji}</span>
+                        <span className="text-sm font-semibold" style={{ color: newCatColor }}>{newCatName || 'Preview'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddCategory}
+                        disabled={!newCatName.trim()}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold border-0 cursor-pointer transition-all ${
+                          newCatName.trim()
+                            ? 'bg-indigo-600 hover:bg-indigo-500 text-white'
+                            : 'bg-slate-300 text-slate-400 cursor-not-allowed'
+                        }`}
+                      >
+                        + Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* V11.4: PWA Installation Status */}
             <div className="flex flex-col gap-2.5">
