@@ -15,9 +15,10 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
   budgetUsed,
   isOverBudget,
 }) => {
-  const intPart = balance.toFixed(2).split('.')[0];
-  const decPart = balance.toFixed(2).split('.')[1];
-  const remaining = Math.max(0, budgetLimit - balance);
+  const safeBalance = typeof balance === 'number' && !isNaN(balance) ? balance : parseFloat(String(balance)) || 0;
+  const intPart = safeBalance.toFixed(2).split('.')[0];
+  const decPart = safeBalance.toFixed(2).split('.')[1];
+  const remaining = Math.max(0, budgetLimit - safeBalance);
 
   const barColor = isOverBudget
     ? 'rgba(239,68,68,0.9)'

@@ -102,7 +102,22 @@ const getNow = () => Date.now();
 export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>(() => {
     const saved = localStorage.getItem('micro_expenses');
-    return saved ? JSON.parse(saved) : [];
+    if (!saved) return [];
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) {
+        return (parsed as Expense[]).map((exp) => {
+          const rawAmount = exp.amount as unknown;
+          return {
+            ...exp,
+            amount: typeof rawAmount === 'string' ? parseFloat(rawAmount) || 0 : Number(rawAmount) || 0
+          };
+        });
+      }
+    } catch (e) {
+      console.error("Failed to parse micro_expenses", e);
+    }
+    return [];
   });
 
   const [amountInput, setAmountInput] = useState('');
