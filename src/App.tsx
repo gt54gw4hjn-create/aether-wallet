@@ -288,7 +288,33 @@ export default function App() {
     }
   }, [isDarkMode]);
 
+  const handleNumpadPress = (key: string) => {
+    playHaptic('click');
+    setAmountInput(prev => {
+      if (key === 'backspace') {
+        if (!prev) return '';
+        return prev.slice(0, -1);
+      }
+      
+      if (key === '.') {
+        if (!prev) return '0.';
+        if (prev.includes('.')) return prev;
+        return prev + '.';
+      }
+      
+      if (prev.includes('.')) {
+        const parts = prev.split('.');
+        if (parts[1] && parts[1].length >= 2) {
+          return prev;
+        }
+      }
+      
+      if (prev === '0' && key === '0') return prev;
+      if (prev === '0' && key !== '0') return key;
 
+      return prev + key;
+    });
+  };
 
   // AI Image Scanning Logic (OpenAI)
   const processAndScanImage = async (croppedUrl: string) => {
@@ -1737,11 +1763,12 @@ export default function App() {
                 <div className="flex items-baseline gap-2">
                   <span className={`text-3xl font-bold ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>RM</span>
                   <input 
-                    type="number" 
+                    type="text" 
                     value={amountInput}
                     onChange={(e) => setAmountInput(e.target.value)}
                     placeholder="0.00"
-                    step="0.01"
+                    readOnly
+                    inputMode="none"
                     className={`w-full max-w-[200px] text-center text-7xl font-bold bg-transparent border-none outline-none p-0 m-0 transition-all 
                                ${isDarkMode ? 'text-slate-200 placeholder-slate-700' : 'text-slate-800 placeholder-slate-300'}
                                ${scannedImage ? 'text-indigo-500 dark:text-indigo-400 drop-shadow-[0_0_12px_rgba(99,102,241,0.3)] animate-pulse' : ''}`}
@@ -1766,6 +1793,27 @@ export default function App() {
                   onChange={handleImageScan} 
                   className="hidden" 
                 />
+
+                {/* V11: Custom Numpad */}
+                <div className="grid grid-cols-3 gap-2 w-full max-w-[260px] mx-auto mt-5">
+                  {['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0', 'backspace'].map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => handleNumpadPress(key)}
+                      className={`h-11 rounded-xl flex items-center justify-center font-bold text-lg select-none transition-all active:scale-90 border-0 cursor-pointer outline-none
+                        ${isDarkMode 
+                          ? 'bg-slate-800/40 text-slate-200 hover:bg-slate-700/60 border border-slate-700/30' 
+                          : 'bg-white/90 text-slate-800 hover:bg-slate-50 border border-slate-200/50 shadow-sm'}`}
+                    >
+                      {key === 'backspace' ? (
+                        <span className="material-symbols-outlined text-[18px]">backspace</span>
+                      ) : (
+                        key
+                      )}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Receipt Preview in Bottom Sheet */}
