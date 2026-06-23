@@ -37,6 +37,7 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
       position: 'relative',
       overflow: 'hidden',
       boxShadow: '0 20px 60px rgba(79,70,229,0.38)',
+      flexShrink: 0,
     }}>
       {/* Decorative orbs */}
       <div style={{ position:'absolute', top:'-40px', right:'-40px', width:'140px', height:'140px', borderRadius:'50%', background:'rgba(255,255,255,0.10)', pointerEvents:'none' }} />

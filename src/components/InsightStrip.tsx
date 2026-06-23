@@ -36,7 +36,7 @@ const InsightStrip: React.FC<InsightStripProps> = ({ dailyAvg, peakDay, thisMont
   ];
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', flexShrink: 0 }}>
       {tiles.map((t) => (
         <div
           key={t.label}

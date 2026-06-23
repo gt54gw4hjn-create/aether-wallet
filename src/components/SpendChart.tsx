@@ -33,6 +33,7 @@ const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode, category
         borderRadius: '1.25rem',
         padding: '1rem',
         backdropFilter: 'blur(10px)',
+        flexShrink: 0,
       }}
     >
       {/* Header */}

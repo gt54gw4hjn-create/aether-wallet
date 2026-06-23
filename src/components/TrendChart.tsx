@@ -81,6 +81,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ expenses, isDarkMode, currencyS
         borderRadius: '1.25rem',
         padding: '1rem',
         backdropFilter: 'blur(10px)',
+        flexShrink: 0,
       }}
     >
       {/* Header */}
