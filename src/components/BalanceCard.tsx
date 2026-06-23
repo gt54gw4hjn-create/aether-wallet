@@ -48,8 +48,9 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
       }}
     >
       {/* Decorative orbs */}
-      <div style={{ position:'absolute', top:'-40px', right:'-40px', width:'140px', height:'140px', borderRadius:'50%', background:'rgba(255,255,255,0.10)', pointerEvents:'none' }} />
-      <div style={{ position:'absolute', bottom:'-25px', left:'20px', width:'100px', height:'100px', borderRadius:'50%', background:'rgba(255,255,255,0.06)', pointerEvents:'none' }} />
+      <div className="card-orb-1" style={{ position:'absolute', top:'-40px', right:'-40px', width:'140px', height:'140px', borderRadius:'50%', background:'rgba(255,255,255,0.10)', pointerEvents:'none' }} />
+      <div className="card-orb-2" style={{ position:'absolute', bottom:'-25px', left:'20px', width:'100px', height:'100px', borderRadius:'50%', background:'rgba(255,255,255,0.06)', pointerEvents:'none' }} />
+      <div className="card-sheen" />
 
       {/* Label */}
       <p style={{ margin:0, fontSize:'0.65rem', fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color:'rgba(255,255,255,0.65)', marginBottom:'0.4rem' }}>
@@ -88,12 +89,15 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
           </div>
           {/* Track */}
           <div style={{ width:'100%', height:'5px', borderRadius:'99px', background:'rgba(0,0,0,0.25)' }}>
-            <div style={{
-              height:'5px', borderRadius:'99px',
-              width:`${budgetUsed}%`,
-              background: barColor,
-              transition: 'width 0.8s cubic-bezier(0.16,1,0.3,1)',
-            }} />
+            <div 
+              className={isOverBudget || budgetUsed > 70 ? 'progress-bar-stripe' : ''}
+              style={{
+                height:'5px', borderRadius:'99px',
+                width:`${budgetUsed}%`,
+                background: barColor,
+                transition: 'width 0.8s cubic-bezier(0.16,1,0.3,1)',
+              }} 
+            />
           </div>
           <div style={{ display:'flex', justifyContent:'space-between', marginTop:'0.25rem' }}>
             <span style={{ fontSize:'0.6rem', color:'rgba(255,255,255,0.45)' }}>{currencySymbol}0</span>
