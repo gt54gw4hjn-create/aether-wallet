@@ -107,50 +107,55 @@ const Dashboard: React.FC<DashboardProps> = ({
       className="w-full"
       style={{
         padding: '1rem',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '0.75rem',
         paddingBottom: '6rem',
         ...themeVars,
       }}
     >
       {/* Balance + budget card */}
-      <BalanceCard
-        balance={balance}
-        budgetLimit={budgetLimit}
-        budgetUsed={budgetUsed}
-        isOverBudget={isOverBudget}
-        currencySymbol={currencySymbol}
-      />
+      <div style={{ marginBottom: '0.75rem' }}>
+        <BalanceCard
+          balance={balance}
+          budgetLimit={budgetLimit}
+          budgetUsed={budgetUsed}
+          isOverBudget={isOverBudget}
+          currencySymbol={currencySymbol}
+        />
+      </div>
 
       {/* Insight tiles */}
       {expenses.length > 0 && (
-        <InsightStrip
-          dailyAvg={dailyAvg}
-          peakDay={daySums[peakDayIdx] > 0 ? dayNames[peakDayIdx] : null}
-          thisMonthTotal={mtdTotal}
-          isDarkMode={isDarkMode}
-          currencySymbol={currencySymbol}
-        />
+        <div style={{ marginBottom: '0.75rem' }}>
+          <InsightStrip
+            dailyAvg={dailyAvg}
+            peakDay={daySums[peakDayIdx] > 0 ? dayNames[peakDayIdx] : null}
+            thisMonthTotal={mtdTotal}
+            isDarkMode={isDarkMode}
+            currencySymbol={currencySymbol}
+          />
+        </div>
       )}
 
       {/* Historical Trend Chart */}
       {expenses.length > 0 && (
-        <TrendChart
-          expenses={expenses}
-          isDarkMode={isDarkMode}
-          currencySymbol={currencySymbol}
-        />
+        <div style={{ marginBottom: '0.75rem' }}>
+          <TrendChart
+            expenses={expenses}
+            isDarkMode={isDarkMode}
+            currencySymbol={currencySymbol}
+          />
+        </div>
       )}
 
       {/* Category bar chart */}
       {catTotals.length > 0 && (
-        <SpendChart catTotals={catTotals} isDarkMode={isDarkMode} categoryBudgets={categoryBudgets} currencySymbol={currencySymbol} />
+        <div style={{ marginBottom: '0.75rem' }}>
+          <SpendChart catTotals={catTotals} isDarkMode={isDarkMode} categoryBudgets={categoryBudgets} currencySymbol={currencySymbol} />
+        </div>
       )}
 
       {/* Full transaction list — rendered by App.tsx with all swipe/bulk features */}
       {children && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0', marginBottom: '0.75rem' }}>
           <p style={{
             margin: '0 0 0.5rem 0.25rem',
             fontSize: '0.65rem',
