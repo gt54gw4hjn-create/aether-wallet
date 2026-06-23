@@ -1648,6 +1648,46 @@ If the document corners are not clear, return a safe estimation covering the mai
     }
   };
 
+  const handleThemeToggle = (e: React.MouseEvent) => {
+    playHaptic('click');
+    const doc = document as Document & {
+      startViewTransition?: (callback: () => void) => {
+        ready: Promise<void>;
+      };
+    };
+    if (!doc.startViewTransition) {
+      setIsDarkMode(!isDarkMode);
+      return;
+    }
+
+    const x = e.clientX;
+    const y = e.clientY;
+    const endRadius = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y)
+    );
+
+    const transition = doc.startViewTransition(() => {
+      setIsDarkMode(!isDarkMode);
+    });
+
+    transition.ready.then(() => {
+      document.documentElement.animate(
+        {
+          clipPath: [
+            `circle(0px at ${x}px ${y}px)`,
+            `circle(${endRadius}px at ${x}px ${y}px)`,
+          ],
+        },
+        {
+          duration: 450,
+          easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+          pseudoElement: '::view-transition-new(root)',
+        }
+      );
+    });
+  };
+
   const handleViewReceipt = async (id: string, title: string) => {
     playHaptic('click');
     const img = await getReceipt(id);
@@ -1705,7 +1745,7 @@ If the document corners are not clear, return a safe estimation covering the mai
           {/* Header actions */}
           <div style={{ display: 'flex', gap: '0.4rem' }}>
             <button
-              onClick={() => setIsDarkMode(!isDarkMode)}
+              onClick={handleThemeToggle}
               style={{
                 width: '34px', height: '34px', borderRadius: '12px', border: 'none', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
