@@ -469,20 +469,11 @@ export default function App() {
     return localStorage.getItem('micro_confetti_enabled') !== 'false';
   });
 
-  // V6 Crop Editor States
-  const [rawImageToCrop, setRawImageToCrop] = useState<string | null>(null);
-  const [isCropEditorOpen, setIsCropEditorOpen] = useState(false);
-  const [cropTop, setCropTop] = useState(5);
-  const [cropBottom, setCropBottom] = useState(5);
-  const [cropLeft, setCropLeft] = useState(5);
-  const [cropRight, setCropRight] = useState(5);
+
 
   // V4 Custom States for Receipts and Swiping
   const [scannedImage, setScannedImage] = useState<string | null>(null);
-  const [rawCroppedImage, setRawCroppedImage] = useState<string | null>(null);
   const [lightboxReceipt, setLightboxReceipt] = useState<{ url: string; title: string; id: string } | null>(null);
-  const [lightboxRawUrl, setLightboxRawUrl] = useState<string | null>(null);
-  const [lightboxActiveFilter, setLightboxActiveFilter] = useState<'original' | 'magic' | 'bw' | 'grayscale'>('magic');
   const [swipeActiveId, setSwipeActiveId] = useState<string | null>(null);
   const [swipeDistance, setSwipeDistance] = useState<number>(0);
   const touchStartX = useRef<number>(0);
@@ -549,124 +540,7 @@ export default function App() {
   };
 
   // AI Image Scanning Logic (OpenAI)
-  const processAndScanImage = async (croppedUrl: string) => {
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    if (!apiKey) {
-      alert("Error: OpenAI API Key not found in .env file.");
-      return;
-    }
-
-    setIsScanning(true);
-    setIsCropEditorOpen(false);
-
-    try {
-      // 1. Keep the color cropped image for the user to review and save in IndexedDB
-      setScannedImage(croppedUrl);
-
-      // 2. Downscale image strictly for OpenAI Vision API (to optimize token usage and cost)
-      const processedDataUrl = await new Promise<string>((resolve, reject) => {
-        const img = new Image();
-        img.src = croppedUrl;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 768;
-          const MAX_HEIGHT = 768;
-          let width = img.width;
-          let height = img.height;
-
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            reject(new Error("Canvas context is null"));
-            return;
-          }
-
-          ctx.drawImage(img, 0, 0, width, height);
-
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          resolve(dataUrl);
-        };
-        img.onerror = (err) => reject(err);
-      });
-
-      const base64Data = processedDataUrl.split(',')[1];
-
-      const response = await fetch(`https://api.openai.com/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey.trim()}`
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "text",
-                  text: "Extract receipt data. Return ONLY JSON: {amount: number, title: string (Merchant - items), date: 'YYYY-MM-DD', time: 'HH:MM' (24h), category: 'food'|'coffee'|'transport'|'shopping'|'entertainment'|'other'}. If invalid, return {error: 'invalid'}. No markdown code blocks."
-                },
-                {
-                  type: "image_url",
-                  image_url: {
-                    url: `data:image/jpeg;base64,${base64Data}`,
-                    detail: "low"
-                  }
-                }
-              ]
-            }
-          ],
-          temperature: 0.1,
-          max_tokens: 150
-        })
-      });
-
-      const data = await response.json();
-      if (data.error) {
-        throw new Error(data.error.message || 'API Error');
-      }
-
-      const text = data.choices?.[0]?.message?.content;
-      if (!text) throw new Error("No text returned from AI");
-
-      const cleanText = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-      const parsed = JSON.parse(cleanText);
-
-      if (parsed.error) {
-        throw new Error(parsed.error);
-      }
-
-      if (parsed.amount) setAmountInput(parsed.amount.toString());
-      if (parsed.title) setTitleInput(parsed.title);
-      if (parsed.date) setDateInput(parsed.date);
-      if (parsed.time) setTimeInput(parsed.time);
-      if (parsed.category) {
-        const cat = categories.find(c => c.id === parsed.category.toLowerCase());
-        if (cat) setSelectedCategory(cat.id);
-      }
-
-    } catch (err: unknown) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      alert("Failed to auto-scan receipt values. You can still manually enter the details. (" + errorMessage + ")");
-    } finally {
-      setIsScanning(false);
-    }
-  };
-
+  // Simple Receipt Attachment Logic
   const handleImageScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -685,161 +559,45 @@ export default function App() {
       img.src = dataUrl;
       img.onload = () => {
         try {
-          let pctTop = 5, pctBottom = 5, pctLeft = 5, pctRight = 5;
+          // Resize the image down to a maximum dimension of 1200px (to keep IndexedDB storage lightweight)
+          const MAX_DIM = 1200;
+          let targetW = img.width;
+          let targetH = img.height;
           
-          // 1. Offscreen Canvas for Edge Detection
-          const detectCanvas = document.createElement('canvas');
-          const dCtx = detectCanvas.getContext('2d');
-          if (dCtx) {
-            const size = 150;
-            detectCanvas.width = size;
-            detectCanvas.height = size;
-            dCtx.drawImage(img, 0, 0, size, size);
-            
-            const imgData = dCtx.getImageData(0, 0, size, size);
-            const pixels = imgData.data;
-            
-            const getPixel = (x: number, y: number) => {
-              const idx = (y * size + x) * 4;
-              return 0.299 * pixels[idx] + 0.587 * pixels[idx+1] + 0.114 * pixels[idx+2];
-            };
-            
-            const rowBrightness = Array(size).fill(0);
-            const colBrightness = Array(size).fill(0);
-            for (let y = 0; y < size; y++) {
-              for (let x = 0; x < size; x++) {
-                const b = getPixel(x, y);
-                rowBrightness[y] += b;
-                colBrightness[x] += b;
-              }
-            }
-            for (let i = 0; i < size; i++) {
-              rowBrightness[i] /= size;
-              colBrightness[i] /= size;
-            }
-            
-            const threshold = 18;
-            let topIdx = 0;
-            const topBorderAvg = (rowBrightness[0] + rowBrightness[1] + rowBrightness[2] + rowBrightness[3] + rowBrightness[4]) / 5;
-            for (let y = 5; y < size / 2; y++) {
-              if (Math.abs(rowBrightness[y] - topBorderAvg) > threshold) {
-                topIdx = y;
-                break;
-              }
-            }
-            
-            let bottomIdx = 0;
-            const bottomBorderAvg = (rowBrightness[size-1] + rowBrightness[size-2] + rowBrightness[size-3] + rowBrightness[size-4] + rowBrightness[size-5]) / 5;
-            for (let y = 5; y < size / 2; y++) {
-              const currentY = size - 1 - y;
-              if (Math.abs(rowBrightness[currentY] - bottomBorderAvg) > threshold) {
-                bottomIdx = y;
-                break;
-              }
-            }
-            
-            let leftIdx = 0;
-            const leftBorderAvg = (colBrightness[0] + colBrightness[1] + colBrightness[2] + colBrightness[3] + colBrightness[4]) / 5;
-            for (let x = 5; x < size / 2; x++) {
-              if (Math.abs(colBrightness[x] - leftBorderAvg) > threshold) {
-                leftIdx = x;
-                break;
-              }
-            }
-            
-            let rightIdx = 0;
-            const rightBorderAvg = (colBrightness[size-1] + colBrightness[size-2] + colBrightness[size-3] + colBrightness[size-4] + colBrightness[size-5]) / 5;
-            for (let x = 5; x < size / 2; x++) {
-              const currentX = size - 1 - x;
-              if (Math.abs(colBrightness[currentX] - rightBorderAvg) > threshold) {
-                rightIdx = x;
-                break;
-              }
-            }
-            
-            pctTop = Math.min(40, Math.max(3, Math.round((topIdx / size) * 100)));
-            pctBottom = Math.min(40, Math.max(3, Math.round((bottomIdx / size) * 100)));
-            pctLeft = Math.min(40, Math.max(3, Math.round((leftIdx / size) * 100)));
-            pctRight = Math.min(40, Math.max(3, Math.round((rightIdx / size) * 100)));
-          }
-
-          // 2. Offscreen Canvas for Crop & CamScanner Filter
-          let cropX = img.width * (pctLeft / 100);
-          let cropY = img.height * (pctTop / 100);
-          let cropW = img.width * (1 - (pctLeft + pctRight) / 100);
-          let cropH = img.height * (1 - (pctTop + pctBottom) / 100);
-          
-          if (isNaN(cropW) || cropW <= 10 || isNaN(cropH) || cropH <= 10 || isNaN(cropX) || isNaN(cropY)) {
-            cropX = img.width * 0.03;
-            cropY = img.height * 0.03;
-            cropW = img.width * 0.94;
-            cropH = img.height * 0.94;
-          }
-
-          const MAX_SAVE_DIM = 1024;
-          let targetW = cropW;
-          let targetH = cropH;
           if (targetW > targetH) {
-            if (targetW > MAX_SAVE_DIM) {
-              targetH = targetH * (MAX_SAVE_DIM / targetW);
-              targetW = MAX_SAVE_DIM;
+            if (targetW > MAX_DIM) {
+              targetH = targetH * (MAX_DIM / targetW);
+              targetW = MAX_DIM;
             }
           } else {
-            if (targetH > MAX_SAVE_DIM) {
-              targetW = targetW * (MAX_SAVE_DIM / targetH);
-              targetH = MAX_SAVE_DIM;
+            if (targetH > MAX_DIM) {
+              targetW = targetW * (MAX_DIM / targetH);
+              targetH = MAX_DIM;
             }
           }
 
-          const cropCanvas = document.createElement('canvas');
-          cropCanvas.width = targetW;
-          cropCanvas.height = targetH;
-          const cCtx = cropCanvas.getContext('2d');
-          if (cCtx) {
-            cCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
-            
-            // Save the raw, unfiltered cropped color image
-            const rawCroppedUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
-            setRawCroppedImage(rawCroppedUrl);
-            
-            // Apply default CamScanner filter: Magic Color (Color contrast boost)
-            const imgData = cCtx.getImageData(0, 0, targetW, targetH);
-            if (imgData) {
-              const pixels = imgData.data;
-              for (let i = 0; i < pixels.length; i += 4) {
-                const contrast = 1.6;
-                const brightness = 15;
-                
-                let r = pixels[i];
-                let g = pixels[i + 1];
-                let b = pixels[i + 2];
-                
-                r = contrast * (r - 128) + 128 + brightness;
-                g = contrast * (g - 128) + 128 + brightness;
-                b = contrast * (b - 128) + 128 + brightness;
-                
-                pixels[i] = Math.max(0, Math.min(255, r));
-                pixels[i + 1] = Math.max(0, Math.min(255, g));
-                pixels[i + 2] = Math.max(0, Math.min(255, b));
-              }
-              cCtx.putImageData(imgData, 0, 0);
-            }
-            
-            const croppedUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
-            processAndScanImage(croppedUrl);
+          const canvas = document.createElement('canvas');
+          canvas.width = targetW;
+          canvas.height = targetH;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, targetW, targetH);
+            const resizedUrl = canvas.toDataURL('image/jpeg', 0.85);
+            setScannedImage(resizedUrl);
           } else {
-            setRawCroppedImage(dataUrl);
-            processAndScanImage(dataUrl);
+            setScannedImage(dataUrl);
           }
         } catch (err) {
-          console.error("Canvas edge detection processing failed, using raw fallback:", err);
-          processAndScanImage(dataUrl);
+          console.error("Resizing receipt image failed:", err);
+          setScannedImage(dataUrl);
+        } finally {
+          setIsScanning(false);
         }
       };
       
       img.onerror = () => {
         setIsScanning(false);
-        alert("Failed to load the captured photo.");
+        alert("Failed to load the selected image.");
       };
     };
   };
@@ -907,9 +665,6 @@ export default function App() {
       
       if (scannedImage) {
         await saveReceipt(editingId, scannedImage);
-        if (rawCroppedImage) {
-          await saveReceipt(editingId + '_raw', rawCroppedImage);
-        }
       } else {
         await deleteReceipt(editingId);
         await deleteReceipt(editingId + '_raw');
@@ -932,9 +687,6 @@ export default function App() {
       updatedExpensesList = [newExpense, ...expenses];
       if (scannedImage) {
         await saveReceipt(newId, scannedImage);
-        if (rawCroppedImage) {
-          await saveReceipt(newId + '_raw', rawCroppedImage);
-        }
       }
     }
 
@@ -1577,93 +1329,11 @@ export default function App() {
   const handleViewReceipt = async (id: string, title: string) => {
     playHaptic('click');
     const img = await getReceipt(id);
-    const rawImg = await getReceipt(id + '_raw');
     if (img) {
       setLightboxReceipt({ url: img, title, id });
-      setLightboxRawUrl(rawImg || img); // Fall back to stored processed image if raw doesn't exist
-      setLightboxActiveFilter('magic'); // Default filter selection indicator
     } else {
       alert("Receipt image not found.");
     }
-  };
-
-  const handleApplyLightboxFilter = async (filterName: 'original' | 'magic' | 'bw' | 'grayscale') => {
-    if (!lightboxReceipt || !lightboxRawUrl) return;
-    playHaptic('success');
-    setLightboxActiveFilter(filterName);
-
-    // If 'original', no canvas filtering is needed, just save the raw image directly
-    if (filterName === 'original') {
-      setLightboxReceipt(prev => prev ? { ...prev, url: lightboxRawUrl } : null);
-      await saveReceipt(lightboxReceipt.id, lightboxRawUrl);
-      return;
-    }
-
-    const img = new Image();
-    img.src = lightboxRawUrl;
-    img.onload = async () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        const imgData = ctx.getImageData(0, 0, img.width, img.height);
-        const pixels = imgData.data;
-
-        if (filterName === 'magic') {
-          // Magic Color contrast filter
-          const contrast = 1.6;
-          const brightness = 15;
-          for (let i = 0; i < pixels.length; i += 4) {
-            let r = pixels[i];
-            let g = pixels[i+1];
-            let b = pixels[i+2];
-            r = contrast * (r - 128) + 128 + brightness;
-            g = contrast * (g - 128) + 128 + brightness;
-            b = contrast * (b - 128) + 128 + brightness;
-            pixels[i] = Math.max(0, Math.min(255, r));
-            pixels[i+1] = Math.max(0, Math.min(255, g));
-            pixels[i+2] = Math.max(0, Math.min(255, b));
-          }
-        } else if (filterName === 'bw') {
-          // Monochrome high-contrast filter
-          for (let i = 0; i < pixels.length; i += 4) {
-            const r = pixels[i];
-            const g = pixels[i+1];
-            const b = pixels[i+2];
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            
-            const contrast = 1.7;
-            const brightness = 12;
-            let val = contrast * (gray - 128) + 128 + brightness;
-            val = Math.max(0, Math.min(255, val));
-            
-            pixels[i] = val;
-            pixels[i+1] = val;
-            pixels[i+2] = val;
-          }
-        } else if (filterName === 'grayscale') {
-          // Smooth grayscale filter
-          for (let i = 0; i < pixels.length; i += 4) {
-            const r = pixels[i];
-            const g = pixels[i+1];
-            const b = pixels[i+2];
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            pixels[i] = gray;
-            pixels[i+1] = gray;
-            pixels[i+2] = gray;
-          }
-        }
-
-        ctx.putImageData(imgData, 0, 0);
-        const filteredUrl = canvas.toDataURL('image/jpeg', 0.85);
-        
-        // Update state and IndexedDB
-        setLightboxReceipt(prev => prev ? { ...prev, url: filteredUrl } : null);
-        await saveReceipt(lightboxReceipt.id, filteredUrl);
-      }
-    };
   };
 
   return (
@@ -2321,53 +1991,17 @@ export default function App() {
               <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
                 <div className={`w-full max-w-sm p-6 rounded-[2.5rem] flex flex-col items-center border shadow-2xl relative overflow-hidden transition-all
                                  ${isDarkMode ? 'bg-slate-900/90 border-slate-800 text-white' : 'bg-white/95 border-slate-200 text-slate-800'}`}>
-                  {/* Decorative backgrounds */}
-                  <div className="absolute top-0 right-0 w-32 h-32 bg-green-500/5 rounded-full blur-2xl pointer-events-none" />
-                  
-                  {/* Scanner Preview */}
-                  {scannedImage && (
-                    <div className="relative w-48 h-64 bg-slate-950 border border-slate-700/80 rounded-2xl overflow-hidden mb-6 shadow-2xl flex items-center justify-center">
-                      <img src={scannedImage} alt="Scanning" className="w-full h-full object-contain opacity-75" />
-                      
-                      {/* Technical Scanner Corners */}
-                      <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-green-500" />
-                      <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-green-500" />
-                      <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-green-500" />
-                      <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-green-500" />
-
-                      {/* Laser scanner line */}
-                      <div 
-                        className="absolute left-0 right-0 h-0.5 bg-green-400 shadow-[0_0_12px_#22c55e,0_0_20px_#22c55e]"
-                        style={{
-                          animation: 'scanLaser 2.2s linear infinite',
-                          top: 0
-                        }}
-                      />
-                    </div>
-                  )}
-                  
-                  {/* Loading Spinner and Status */}
-                  <div className="flex flex-col items-center text-center">
-                    <div className="relative w-12 h-12 flex items-center justify-center mb-4">
-                      {/* Spinner Ring */}
-                      <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800" />
-                      <div className="absolute inset-0 rounded-full border-4 border-green-500 border-t-transparent animate-spin" />
-                      <span className="material-symbols-outlined text-green-500 text-[20px] font-bold">document_scanner</span>
-                    </div>
-
-                    <h3 className={`text-base font-extrabold tracking-tight mb-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                      CamScanner AI Processing
-                    </h3>
-                    <p className={`text-xs font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                      Extracting merchant, total, and items...
-                    </p>
-                    
-                    {/* Visual status badge */}
-                    <div className="mt-4 flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 border border-green-500/20 text-green-500 uppercase tracking-wider">
-                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
-                      Optimizing Image Contrast
-                    </div>
+                  <div className="relative w-12 h-12 flex items-center justify-center mb-4">
+                    <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800" />
+                    <div className="absolute inset-0 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin" />
+                    <span className="material-symbols-outlined text-indigo-500 text-[20px] font-bold">attach_file</span>
                   </div>
+                  <h3 className={`text-base font-extrabold tracking-tight mb-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                    Processing Receipt
+                  </h3>
+                  <p className={`text-xs font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Attaching image to transaction...
+                  </p>
                 </div>
               </div>
             )}
@@ -2375,17 +2009,11 @@ export default function App() {
               
               {/* Amount Input */}
               <div className="flex flex-col items-center justify-center relative">
-                {scannedImage && (
-                  <span className={`text-[10px] font-bold uppercase tracking-wider mb-2 px-2.5 py-1 rounded-full ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
-                    Please Review AI Extraction
-                  </span>
-                )}
                 <div className="flex items-center justify-center gap-2 w-full">
                   <span className={`text-3xl font-bold ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>{getCurrencySymbol(currency)}</span>
                   <div 
                     className={`w-full max-w-[280px] text-center text-6xl font-bold bg-transparent border-none outline-none p-0 m-0 transition-all select-none
-                               ${amountInput ? (isDarkMode ? 'text-slate-200' : 'text-slate-800') : (isDarkMode ? 'text-slate-700' : 'text-slate-300')}
-                               ${scannedImage ? 'text-indigo-500 dark:text-indigo-400 drop-shadow-[0_0_12px_rgba(99,102,241,0.3)] animate-pulse' : ''}`}
+                               ${amountInput ? (isDarkMode ? 'text-slate-200' : 'text-slate-800') : (isDarkMode ? 'text-slate-700' : 'text-slate-300')}`}
                     style={{ 
                       minHeight: '72px', 
                       display: 'flex', 
@@ -2401,15 +2029,15 @@ export default function App() {
                   </div>
                 </div>
                 
-                {/* AI Scanner Button */}
+                {/* Receipt Attachment Button */}
                 <button 
                   type="button" 
                   onClick={() => fileInputRef.current?.click()}
                   className={`mt-4 flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-semibold border transition-all active:scale-95 cursor-pointer outline-none shadow-sm
                             ${isDarkMode ? 'border-indigo-500/30 text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20' : 'border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100'}`}
                 >
-                  <span className="material-symbols-outlined text-[16px]">document_scanner</span>
-                  Scan Receipt (AI)
+                  <span className="material-symbols-outlined text-[16px]">attach_file</span>
+                  Attach Receipt
                 </button>
                 <input 
                   type="file" 
@@ -2685,29 +2313,22 @@ export default function App() {
         </div>
       </div>
 
-      {/* Receipt Lightbox Modal - CamScanner Workspace */}
+      {/* Receipt Lightbox Modal */}
       {lightboxReceipt && (
         <div 
           className="fixed inset-0 z-50 bg-[#070913]/90 backdrop-blur-xl flex flex-col items-center justify-center p-4 md:p-6 animate-in fade-in duration-300"
           onClick={() => setLightboxReceipt(null)}
         >
           <div 
-            className="flex flex-col items-center max-w-md w-full bg-slate-900/80 backdrop-blur-md border border-white/10 rounded-[2.5rem] shadow-3xl overflow-hidden animate-in scale-in duration-300" 
+            className="flex flex-col items-center max-w-md w-full bg-slate-900/85 backdrop-blur-md border border-white/10 rounded-[2rem] shadow-3xl overflow-hidden animate-in scale-in duration-300" 
             onClick={e => e.stopPropagation()}
           >
             {/* Header bar */}
             <div className="w-full flex items-center justify-between p-5 border-b border-white/5 bg-slate-950/40">
               <div className="flex flex-col text-left">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-[#00bfa5] tracking-wider uppercase bg-[#00bfa5]/10 px-2 py-0.5 rounded-full border border-[#00bfa5]/20">
-                    CamScanner Mode
-                  </span>
-                  {lightboxActiveFilter !== 'original' && (
-                    <span className="text-[10px] font-bold text-indigo-400 tracking-wider uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
-                      Enhanced
-                    </span>
-                  )}
-                </div>
+                <span className="text-[10px] font-bold text-indigo-400 tracking-wider uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20 w-fit">
+                  Receipt Viewer
+                </span>
                 <h3 className="text-sm font-extrabold text-white truncate max-w-[220px] mt-1.5">{lightboxReceipt.title}</h3>
               </div>
               <button 
@@ -2719,54 +2340,12 @@ export default function App() {
             </div>
             
             {/* Image Preview Area */}
-            <div className="relative w-full p-6 flex items-center justify-center bg-slate-950/60 min-h-[35vh] max-h-[45vh] overflow-hidden border-b border-white/5">
-              {/* Corner decos to make it look like a real document crop area */}
-              <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-[#00bfa5]/80 rounded-tl-sm"></div>
-              <div className="absolute top-4 right-4 w-4 h-4 border-t-2 border-r-2 border-[#00bfa5]/80 rounded-tr-sm"></div>
-              <div className="absolute bottom-4 left-4 w-4 h-4 border-b-2 border-l-2 border-[#00bfa5]/80 rounded-bl-sm"></div>
-              <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-[#00bfa5]/80 rounded-br-sm"></div>
-              
+            <div className="relative w-full p-6 flex items-center justify-center bg-slate-950/60 min-h-[40vh] max-h-[50vh] overflow-hidden border-b border-white/5">
               <img 
                 src={lightboxReceipt.url} 
-                alt="Scanned Document" 
-                className="max-w-full max-h-[38vh] object-contain rounded-xl shadow-2xl select-none transition-all duration-300 border border-white/5"
+                alt="Receipt Document" 
+                className="max-w-full max-h-[44vh] object-contain rounded-xl shadow-2xl select-none border border-white/5"
               />
-            </div>
-
-            {/* Filter Selection Panel */}
-            <div className="w-full p-5 bg-slate-950/20 flex flex-col gap-3">
-              <span className="text-[11px] font-bold text-slate-400 tracking-wider uppercase px-1">Filter Preset</span>
-              <div className="grid grid-cols-4 gap-2 w-full">
-                {([
-                  { id: 'original', name: 'Original', icon: 'image', desc: 'Raw Photo' },
-                  { id: 'magic', name: 'Magic', icon: 'auto_fix_high', desc: 'Contrast' },
-                  { id: 'bw', name: 'B&W', icon: 'contrast', desc: 'Monochrome' },
-                  { id: 'grayscale', name: 'Grayscale', icon: 'gradient', desc: 'Smooth' }
-                ] as const).map((f) => {
-                  const isActive = lightboxActiveFilter === f.id;
-                  return (
-                    <button
-                      key={f.id}
-                      onClick={() => handleApplyLightboxFilter(f.id)}
-                      className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border transition-all duration-300 cursor-pointer select-none bg-slate-900/60
-                        ${isActive 
-                          ? 'border-[#00bfa5] bg-gradient-to-b from-[#00bfa5]/10 to-[#00bfa5]/0 text-white shadow-[0_0_12px_rgba(0,191,165,0.15)] hover:bg-[#00bfa5]/15' 
-                          : 'border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10 hover:bg-slate-900'}`}
-                    >
-                      <div 
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300
-                          ${isActive ? 'bg-[#00bfa5]/20 text-[#00bfa5]' : 'bg-white/5 text-slate-400'}`}
-                      >
-                        <span className="material-symbols-outlined text-[20px]">{f.icon}</span>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-[10px] font-bold tracking-tight leading-none">{f.name}</p>
-                        <p className="text-[8px] text-slate-500 font-medium leading-none mt-0.5">{f.desc}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
 
             {/* Bottom Actions Bar */}
@@ -2781,8 +2360,8 @@ export default function App() {
                     if (editingId === lightboxReceipt.id) setScannedImage(null);
                   }
                 }}
-                className="flex items-center justify-center w-11 h-11 rounded-2xl bg-red-950/30 border border-red-900/30 hover:border-red-800 hover:bg-red-900/40 text-red-400 transition-all duration-200 cursor-pointer"
-                title="Delete Scan"
+                className="flex items-center justify-center w-11 h-11 rounded-2xl bg-red-950/30 border border-red-900/30 hover:border-[#ef4444]/40 hover:bg-[#ef4444]/10 text-red-400 transition-all duration-200 cursor-pointer"
+                title="Delete Receipt"
               >
                 <span className="material-symbols-outlined text-[20px]">delete</span>
               </button>
@@ -2800,7 +2379,7 @@ export default function App() {
                 
                 <button 
                   onClick={() => { playHaptic('success'); setLightboxReceipt(null); }}
-                  className="flex items-center gap-1.5 px-5 h-11 rounded-2xl text-xs font-bold bg-gradient-to-r from-[#00bfa5] to-emerald-500 hover:from-[#00d4b8] hover:to-emerald-400 text-white transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(0,191,165,0.2)] hover:shadow-[0_4px_16px_rgba(0,191,165,0.3)] active:scale-95"
+                  className="flex items-center gap-1.5 px-5 h-11 rounded-2xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(99,102,241,0.2)] active:scale-95"
                 >
                   Done
                 </button>
@@ -3334,175 +2913,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Receipt Crop & Preprocess Editor Modal */}
-      {isCropEditorOpen && rawImageToCrop && (
-        <div className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-in fade-in">
-          {/* Header */}
-          <div className="text-center text-white mb-4">
-            <h3 className="text-lg font-bold mb-1">Crop Receipt</h3>
-            <p className="text-xs text-slate-400">Drag sliders to crop out background clutter</p>
-          </div>
-
-          {/* Visual Image Preview with Bounding Box Overlay */}
-          <div className="relative max-w-sm w-full bg-slate-900 border border-white/10 rounded-2xl overflow-hidden flex items-center justify-center max-h-[50vh]">
-            <img 
-              src={rawImageToCrop} 
-              alt="Raw scan" 
-              className="max-w-full max-h-[48vh] object-contain select-none opacity-90"
-            />
-            {/* Draggable/Visual overlay box shadows indicating dark borders outside cropped region */}
-            <div 
-              className="absolute pointer-events-none border-2 border-dashed border-indigo-500/80 shadow-[0_0_20px_rgba(99,102,241,0.5)]"
-              style={{
-                top: `${cropTop}%`,
-                bottom: `${cropBottom}%`,
-                left: `${cropLeft}%`,
-                right: `${cropRight}%`
-              }}
-            >
-              {/* Corner indicators */}
-              <div className="absolute top-0 left-0 w-3 h-3 border-t-2 border-l-2 border-indigo-400 -translate-x-0.5 -translate-y-0.5" />
-              <div className="absolute top-0 right-0 w-3 h-3 border-t-2 border-r-2 border-indigo-400 translate-x-0.5 -translate-y-0.5" />
-              <div className="absolute bottom-0 left-0 w-3 h-3 border-b-2 border-l-2 border-indigo-400 -translate-x-0.5 translate-y-0.5" />
-              <div className="absolute bottom-0 right-0 w-3 h-3 border-b-2 border-r-2 border-indigo-400 translate-x-0.5 translate-y-0.5" />
-            </div>
-            {/* Shading outside the crop area */}
-            <div className="absolute inset-0 bg-black/50 pointer-events-none" style={{ clipPath: `polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${cropLeft}% ${cropTop}%, ${100 - cropRight}% ${cropTop}%, ${100 - cropRight}% ${100 - cropBottom}%, ${cropLeft}% ${100 - cropBottom}%, ${cropLeft}% ${cropTop}%)` }} />
-          </div>
-
-          {/* Sliders Area */}
-          <div className="w-full max-w-sm flex flex-col gap-3 mt-4 px-4">
-            <div className="grid grid-cols-2 gap-3">
-              {/* Crop Top */}
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Crop Top: {cropTop}%</span>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="45" 
-                  value={cropTop} 
-                  onChange={(e) => setCropTop(parseInt(e.target.value))}
-                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                />
-              </div>
-              {/* Crop Bottom */}
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Crop Bottom: {cropBottom}%</span>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="45" 
-                  value={cropBottom} 
-                  onChange={(e) => setCropBottom(parseInt(e.target.value))}
-                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                />
-              </div>
-              {/* Crop Left */}
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Crop Left: {cropLeft}%</span>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="45" 
-                  value={cropLeft} 
-                  onChange={(e) => setCropLeft(parseInt(e.target.value))}
-                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                />
-              </div>
-              {/* Crop Right */}
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">Crop Right: {cropRight}%</span>
-                <input 
-                  type="range" 
-                  min="0" 
-                  max="45" 
-                  value={cropRight} 
-                  onChange={(e) => setCropRight(parseInt(e.target.value))}
-                  className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                />
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex gap-3 mt-3 w-full">
-              <button 
-                type="button"
-                onClick={() => { playHaptic('click'); setIsCropEditorOpen(false); setRawImageToCrop(null); }}
-                className="flex-1 py-3 rounded-xl font-bold text-xs bg-slate-800 text-white hover:bg-slate-700 transition-colors border-0 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button 
-                type="button"
-                onClick={() => {
-                  playHaptic('success');
-                  const img = new Image();
-                  img.src = rawImageToCrop;
-                  img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    const x = img.width * (cropLeft / 100);
-                    const y = img.height * (cropTop / 100);
-                    const w = img.width * (1 - (cropLeft + cropRight) / 100);
-                    const h = img.height * (1 - (cropTop + cropBottom) / 100);
-                    
-                    // Downscale the saved receipt image to a reasonable size (max 1024px) to optimize IndexedDB storage and JSON exports
-                    const MAX_SAVE_DIM = 1024;
-                    let targetW = w;
-                    let targetH = h;
-                    if (targetW > targetH) {
-                      if (targetW > MAX_SAVE_DIM) {
-                        targetH = targetH * (MAX_SAVE_DIM / targetW);
-                        targetW = MAX_SAVE_DIM;
-                      }
-                    } else {
-                      if (targetH > MAX_SAVE_DIM) {
-                        targetW = targetW * (MAX_SAVE_DIM / targetH);
-                        targetH = MAX_SAVE_DIM;
-                      }
-                    }
-
-                    canvas.width = targetW;
-                    canvas.height = targetH;
-                    const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                      ctx.drawImage(img, x, y, w, h, 0, 0, targetW, targetH);
-                      
-                      // Apply CamScanner filter (Grayscale + High Contrast + Brighten)
-                      const imgData = ctx.getImageData(0, 0, targetW, targetH);
-                      if (imgData) {
-                        const data = imgData.data;
-                        for (let i = 0; i < data.length; i += 4) {
-                          const r = data[i];
-                          const g = data[i + 1];
-                          const b = data[i + 2];
-                          const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-                          
-                          // Stretch contrast and boost brightness for a crisp black-and-white scan look
-                          const contrast = 1.7;
-                          const brightness = 12;
-                          let newVal = contrast * (gray - 128) + 128 + brightness;
-                          newVal = Math.max(0, Math.min(255, newVal));
-                          
-                          data[i] = newVal;
-                          data[i + 1] = newVal;
-                          data[i + 2] = newVal;
-                        }
-                        ctx.putImageData(imgData, 0, 0);
-                      }
-                      
-                      const croppedUrl = canvas.toDataURL('image/jpeg', 0.85);
-                      processAndScanImage(croppedUrl);
-                    }
-                  };
-                }}
-                className="flex-[2] py-3 rounded-xl font-bold text-xs bg-indigo-600 text-white hover:bg-indigo-700 transition-colors border-0 cursor-pointer shadow-lg shadow-indigo-600/20"
-              >
-                Crop & Enhance (Scan)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Confetti Overlay Canvas */}
       <canvas 
