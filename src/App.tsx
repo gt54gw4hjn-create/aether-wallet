@@ -618,7 +618,8 @@ export default function App() {
 
   const handleAddExpense = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amountInput || parseFloat(amountInput) <= 0) return;
+    const parsedAmount = parseFloat(amountInput);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) return;
 
     const cat = categories.find(c => c.id === selectedCategory);
     const finalTitle = titleInput.trim() || cat?.label || 'Expense';

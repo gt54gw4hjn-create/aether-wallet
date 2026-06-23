@@ -1,4 +1,4 @@
-const CACHE_NAME = 'timmy-wallet-v3';
+const CACHE_NAME = 'timmy-wallet-v4';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

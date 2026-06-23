@@ -3,7 +3,8 @@ import type { Expense } from '../types';
 export const calculateBalance = (expenses: Expense[]): number => {
   if (!Array.isArray(expenses)) return 0;
   return expenses.reduce((sum, exp) => {
-    const val = typeof exp.amount === 'string' ? parseFloat(exp.amount) : exp.amount;
-    return sum + (Number.isNaN(val) || !val ? 0 : val);
+    if (!exp) return sum;
+    const val = typeof exp.amount === 'number' ? exp.amount : parseFloat(String(exp.amount));
+    return sum + (isNaN(val) || val <= 0 ? 0 : val);
   }, 0);
 };
