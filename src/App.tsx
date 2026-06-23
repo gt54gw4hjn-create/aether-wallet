@@ -1653,6 +1653,7 @@ If the document corners are not clear, return a safe estimation covering the mai
     const doc = document as Document & {
       startViewTransition?: (callback: () => void) => {
         ready: Promise<void>;
+        finished: Promise<void>;
       };
     };
     if (!doc.startViewTransition) {
@@ -1660,12 +1661,15 @@ If the document corners are not clear, return a safe estimation covering the mai
       return;
     }
 
-    const x = e.clientX;
-    const y = e.clientY;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX || (rect.left + rect.width / 2);
+    const y = e.clientY || (rect.top + rect.height / 2);
     const endRadius = Math.hypot(
       Math.max(x, window.innerWidth - x),
       Math.max(y, window.innerHeight - y)
     );
+
+    document.documentElement.classList.add('theme-transitioning');
 
     const transition = doc.startViewTransition(() => {
       setIsDarkMode(!isDarkMode);
@@ -1680,11 +1684,15 @@ If the document corners are not clear, return a safe estimation covering the mai
           ],
         },
         {
-          duration: 450,
-          easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+          duration: 500,
+          easing: 'cubic-bezier(0.16, 1, 0.3, 1)',
           pseudoElement: '::view-transition-new(root)',
         }
       );
+    });
+
+    transition.finished.then(() => {
+      document.documentElement.classList.remove('theme-transitioning');
     });
   };
 
@@ -1755,7 +1763,15 @@ If the document corners are not clear, return a safe estimation covering the mai
                 transition: 'all 0.2s ease',
               }}
             >
-              <span className="material-symbols-outlined" style={{ fontSize: '16px', fontVariationSettings: "'FILL' 1" }}>
+              <span 
+                className="material-symbols-outlined" 
+                style={{ 
+                  fontSize: '16px', 
+                  fontVariationSettings: "'FILL' 1",
+                  transform: isDarkMode ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)'
+                }}
+              >
                 {isDarkMode ? 'light_mode' : 'dark_mode'}
               </span>
             </button>
