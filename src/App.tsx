@@ -312,6 +312,7 @@ export default function App() {
   
   // AI Scanner State
   const [isScanning, setIsScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState("Uploading receipt photo...");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const confettiCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -473,7 +474,10 @@ export default function App() {
 
   // V4 Custom States for Receipts and Swiping
   const [scannedImage, setScannedImage] = useState<string | null>(null);
+  const [rawCroppedImage, setRawCroppedImage] = useState<string | null>(null);
   const [lightboxReceipt, setLightboxReceipt] = useState<{ url: string; title: string; id: string } | null>(null);
+  const [lightboxRawUrl, setLightboxRawUrl] = useState<string | null>(null);
+  const [lightboxActiveFilter, setLightboxActiveFilter] = useState<'original' | 'magic' | 'bw' | 'grayscale'>('magic');
   const [swipeActiveId, setSwipeActiveId] = useState<string | null>(null);
   const [swipeDistance, setSwipeDistance] = useState<number>(0);
   const touchStartX = useRef<number>(0);
@@ -539,8 +543,332 @@ export default function App() {
     });
   };
 
-  // AI Image Scanning Logic (OpenAI)
-  // Simple Receipt Attachment Logic
+  // 📐 Mathematical Perspective Warp for AI-Enhanced Scanning (Background Removal & Flattening)
+  const warpPerspective = (
+    img: HTMLImageElement,
+    corners: {
+      top_left: [number, number];
+      top_right: [number, number];
+      bottom_left: [number, number];
+      bottom_right: [number, number];
+    },
+    srcW: number,
+    srcH: number
+  ): string => {
+    try {
+      // normalized percentage coordinates to absolute pixel coordinates
+      const x0 = (corners.top_left[0] / 100) * srcW;
+      const y0 = (corners.top_left[1] / 100) * srcH;
+      const x1 = (corners.top_right[0] / 100) * srcW;
+      const y1 = (corners.top_right[1] / 100) * srcH;
+      const x2 = (corners.bottom_left[0] / 100) * srcW;
+      const y2 = (corners.bottom_left[1] / 100) * srcH;
+      const x3 = (corners.bottom_right[0] / 100) * srcW;
+      const y3 = (corners.bottom_right[1] / 100) * srcH;
+
+      // Calculate target width and height based on corner distances
+      const wTop = Math.sqrt((x1 - x0) ** 2 + (y1 - y0) ** 2);
+      const wBottom = Math.sqrt((x3 - x2) ** 2 + (y3 - y2) ** 2);
+      const hLeft = Math.sqrt((x2 - x0) ** 2 + (y2 - y0) ** 2);
+      const hRight = Math.sqrt((x3 - x1) ** 2 + (y3 - y1) ** 2);
+
+      let targetW = Math.round(Math.max(wTop, wBottom));
+      let targetH = Math.round(Math.max(hLeft, hRight));
+
+      // Safe bounds constraints
+      if (targetW < 100 || targetH < 100) {
+        targetW = 600;
+        targetH = 800;
+      } else {
+        const MAX_DIM = 1200;
+        if (targetW > targetH) {
+          if (targetW > MAX_DIM) {
+            targetH = Math.round(targetH * (MAX_DIM / targetW));
+            targetW = MAX_DIM;
+          }
+        } else {
+          if (targetH > MAX_DIM) {
+            targetW = Math.round(targetW * (MAX_DIM / targetH));
+            targetH = MAX_DIM;
+          }
+        }
+      }
+
+      const canvas = document.createElement('canvas');
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return img.src;
+
+      const srcCanvas = document.createElement('canvas');
+      srcCanvas.width = srcW;
+      srcCanvas.height = srcH;
+      const srcCtx = srcCanvas.getContext('2d');
+      if (!srcCtx) return img.src;
+      srcCtx.drawImage(img, 0, 0, srcW, srcH);
+      const srcData = srcCtx.getImageData(0, 0, srcW, srcH);
+      const srcPixels = srcData.data;
+
+      // Heckbert homography coefficients (mapping target [0,1]x[0,1] to source quad)
+      const dx1 = x1 - x3;
+      const dx2 = x2 - x3;
+      const dy1 = y1 - y3;
+      const dy2 = y2 - y3;
+      const sx = x0 - x1 + x3 - x2;
+      const sy = y0 - y1 + y3 - y2;
+
+      let a, b, c, d, e, f, g, h;
+      const det = dx1 * dy2 - dy1 * dx2;
+      if (Math.abs(det) < 0.0001) {
+        // Affine fallback
+        a = x1 - x0;
+        b = x2 - x0;
+        c = x0;
+        d = y1 - y0;
+        e = y2 - y0;
+        f = y0;
+        g = 0;
+        h = 0;
+      } else {
+        g = (sx * dy2 - sy * dx2) / det;
+        h = (dx1 * sy - dy1 * sx) / det;
+        a = x1 - x0 + g * x1;
+        b = x2 - x0 + h * x2;
+        c = x0;
+        d = y1 - y0 + g * y1;
+        e = y2 - y0 + h * y2;
+        f = y0;
+      }
+
+      const dstData = ctx.createImageData(targetW, targetH);
+      const dstPixels = dstData.data;
+
+      for (let yDst = 0; yDst < targetH; yDst++) {
+        const v = yDst / targetH;
+        for (let xDst = 0; xDst < targetW; xDst++) {
+          const u = xDst / targetW;
+          const den = g * u + h * v + 1;
+          const xSrc = Math.round((a * u + b * v + c) / den);
+          const ySrc = Math.round((d * u + e * v + f) / den);
+
+          const dstIdx = (yDst * targetW + xDst) * 4;
+          if (xSrc >= 0 && xSrc < srcW && ySrc >= 0 && ySrc < srcH) {
+            const srcIdx = (ySrc * srcW + xSrc) * 4;
+            dstPixels[dstIdx] = srcPixels[srcIdx];
+            dstPixels[dstIdx + 1] = srcPixels[srcIdx + 1];
+            dstPixels[dstIdx + 2] = srcPixels[srcIdx + 2];
+            dstPixels[dstIdx + 3] = srcPixels[srcIdx + 3];
+          } else {
+            // White fill for background removal boundary
+            dstPixels[dstIdx] = 255;
+            dstPixels[dstIdx + 1] = 255;
+            dstPixels[dstIdx + 2] = 255;
+            dstPixels[dstIdx + 3] = 255;
+          }
+        }
+      }
+
+      ctx.putImageData(dstData, 0, 0);
+      return canvas.toDataURL('image/jpeg', 0.85);
+    } catch (err) {
+      console.error("Warp perspective failed:", err);
+      return img.src;
+    }
+  };
+
+  // Default Magic Color Contrast Enhancement Filter
+  const applyMagicColorFilter = (dataUrl: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = dataUrl;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const imgData = ctx.getImageData(0, 0, img.width, img.height);
+          const pixels = imgData.data;
+          
+          const contrast = 1.6;
+          const brightness = 15;
+          for (let i = 0; i < pixels.length; i += 4) {
+            let r = pixels[i];
+            let g = pixels[i+1];
+            let b = pixels[i+2];
+            r = contrast * (r - 128) + 128 + brightness;
+            g = contrast * (g - 128) + 128 + brightness;
+            b = contrast * (b - 128) + 128 + brightness;
+            pixels[i] = Math.max(0, Math.min(255, r));
+            pixels[i+1] = Math.max(0, Math.min(255, g));
+            pixels[i+2] = Math.max(0, Math.min(255, b));
+          }
+          ctx.putImageData(imgData, 0, 0);
+          resolve(canvas.toDataURL('image/jpeg', 0.85));
+        } else {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+    });
+  };
+
+  // AI OCR Scanning & Auto-Bookkeeping Function
+  const processAndScanImage = async (originalDataUrl: string) => {
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    if (!apiKey) {
+      alert("Error: OpenAI API Key not found in .env file.");
+      setIsScanning(false);
+      return;
+    }
+
+    try {
+      setScanStatus("Uploading receipt photo...");
+
+      // 1. Resize photo down to 768px for OpenAI vision input (saves token cost & latency)
+      const openAiDataUrl = await new Promise<string>((resolve, reject) => {
+        const img = new Image();
+        img.src = originalDataUrl;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 768;
+          const MAX_HEIGHT = 768;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error("Canvas context is null"));
+            return;
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
+        };
+        img.onerror = (err) => reject(err);
+      });
+
+      const base64Data = openAiDataUrl.split(',')[1];
+
+      // Update UI Ticker
+      setScanStatus("AI Locating document corners...");
+
+      const response = await fetch(`https://api.openai.com/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey.trim()}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `Analyze the receipt image. Return ONLY a JSON object containing:
+1. "amount": number (extracted total amount of transaction)
+2. "title": string (Merchant - items / description)
+3. "date": string (Format: "YYYY-MM-DD")
+4. "time": string (Format: "HH:MM" 24h)
+5. "category": string ("food"|"coffee"|"transport"|"shopping"|"entertainment"|"other")
+6. "corners": an object containing the normalized coordinates of the four corners of the receipt paper page in the image. The coordinates must be represented as [x, y] arrays where x and y are numbers from 0 to 100 (0 is left/top, 100 is right/bottom of the image). Format:
+   "corners": {
+     "top_left": [x, y],
+     "top_right": [x, y],
+     "bottom_left": [x, y],
+     "bottom_right": [x, y]
+   }
+If the document corners are not clear, return a safe estimation covering the main document page. No markdown wrapping or extra text.`
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:image/jpeg;base64,${base64Data}`,
+                    detail: "low"
+                  }
+                }
+              ]
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 250,
+          response_format: { type: "json_object" }
+        })
+      });
+
+      const data = await response.json();
+      if (data.error) {
+        throw new Error(data.error.message || 'API Error');
+      }
+
+      const text = data.choices?.[0]?.message?.content;
+      if (!text) throw new Error("No response from AI");
+
+      const parsed = JSON.parse(text);
+
+      if (parsed.error) {
+        throw new Error(parsed.error);
+      }
+
+      setScanStatus("Correcting skew & removing background...");
+
+      // 2. Load original high-resolution photo to perform perspective crop
+      const img = new Image();
+      img.src = originalDataUrl;
+      await new Promise((resolve) => {
+        img.onload = resolve;
+      });
+
+      const corners = parsed.corners || {
+        top_left: [3, 3],
+        top_right: [97, 3],
+        bottom_left: [3, 97],
+        bottom_right: [97, 97]
+      };
+
+      const croppedUrl = warpPerspective(img, corners, img.width, img.height);
+      setRawCroppedImage(croppedUrl);
+
+      // 3. Apply default contrast filter (Magic Color)
+      setScanStatus("Enhancing scan contrast & details...");
+      const enhancedUrl = await applyMagicColorFilter(croppedUrl);
+      setScannedImage(enhancedUrl);
+
+      // Populate form fields for auto-bookkeeping
+      if (parsed.amount) setAmountInput(parsed.amount.toString());
+      if (parsed.title) setTitleInput(parsed.title);
+      if (parsed.date) setDateInput(parsed.date);
+      if (parsed.time) setTimeInput(parsed.time);
+      if (parsed.category) {
+        const cat = categories.find(c => c.id === parsed.category.toLowerCase());
+        if (cat) setSelectedCategory(cat.id);
+      }
+
+    } catch (err: unknown) {
+      console.error(err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      alert("Failed to auto-scan receipt values. You can still manually enter the details. (" + errMsg + ")");
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
   const handleImageScan = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -559,8 +887,8 @@ export default function App() {
       img.src = dataUrl;
       img.onload = () => {
         try {
-          // Resize the image down to a maximum dimension of 1200px (to keep IndexedDB storage lightweight)
-          const MAX_DIM = 1200;
+          // Resize original image to max 1600px for sharp high-quality scans
+          const MAX_DIM = 1600;
           let targetW = img.width;
           let targetH = img.height;
           
@@ -582,16 +910,14 @@ export default function App() {
           const ctx = canvas.getContext('2d');
           if (ctx) {
             ctx.drawImage(img, 0, 0, targetW, targetH);
-            const resizedUrl = canvas.toDataURL('image/jpeg', 0.85);
-            setScannedImage(resizedUrl);
+            const highResDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            processAndScanImage(highResDataUrl);
           } else {
-            setScannedImage(dataUrl);
+            processAndScanImage(dataUrl);
           }
         } catch (err) {
-          console.error("Resizing receipt image failed:", err);
-          setScannedImage(dataUrl);
-        } finally {
-          setIsScanning(false);
+          console.error("Preparing image for scan failed:", err);
+          processAndScanImage(dataUrl);
         }
       };
       
@@ -665,6 +991,9 @@ export default function App() {
       
       if (scannedImage) {
         await saveReceipt(editingId, scannedImage);
+        if (rawCroppedImage) {
+          await saveReceipt(editingId + '_raw', rawCroppedImage);
+        }
       } else {
         await deleteReceipt(editingId);
         await deleteReceipt(editingId + '_raw');
@@ -687,6 +1016,9 @@ export default function App() {
       updatedExpensesList = [newExpense, ...expenses];
       if (scannedImage) {
         await saveReceipt(newId, scannedImage);
+        if (rawCroppedImage) {
+          await saveReceipt(newId + '_raw', rawCroppedImage);
+        }
       }
     }
 
@@ -1329,10 +1661,161 @@ export default function App() {
   const handleViewReceipt = async (id: string, title: string) => {
     playHaptic('click');
     const img = await getReceipt(id);
+    const rawImg = await getReceipt(id + '_raw');
     if (img) {
       setLightboxReceipt({ url: img, title, id });
+      setLightboxRawUrl(rawImg || img);
+      setLightboxActiveFilter('magic');
     } else {
       alert("Receipt image not found.");
+    }
+  };
+
+  const handleApplyLightboxFilter = async (filterName: 'original' | 'magic' | 'bw' | 'grayscale') => {
+    if (!lightboxReceipt || !lightboxRawUrl) return;
+    playHaptic('success');
+    setLightboxActiveFilter(filterName);
+
+    if (filterName === 'original') {
+      setLightboxReceipt(prev => prev ? { ...prev, url: lightboxRawUrl } : null);
+      await saveReceipt(lightboxReceipt.id, lightboxRawUrl);
+      return;
+    }
+
+    const img = new Image();
+    img.src = lightboxRawUrl;
+    img.onload = async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, img.width, img.height);
+        const pixels = imgData.data;
+
+        if (filterName === 'magic') {
+          // Magic Color contrast filter
+          const contrast = 1.6;
+          const brightness = 15;
+          for (let i = 0; i < pixels.length; i += 4) {
+            let r = pixels[i];
+            let g = pixels[i+1];
+            let b = pixels[i+2];
+            r = contrast * (r - 128) + 128 + brightness;
+            g = contrast * (g - 128) + 128 + brightness;
+            b = contrast * (b - 128) + 128 + brightness;
+            pixels[i] = Math.max(0, Math.min(255, r));
+            pixels[i+1] = Math.max(0, Math.min(255, g));
+            pixels[i+2] = Math.max(0, Math.min(255, b));
+          }
+        } else if (filterName === 'bw') {
+          // Monochrome high-contrast filter
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = pixels[i];
+            const g = pixels[i+1];
+            const b = pixels[i+2];
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            
+            const contrast = 1.7;
+            const brightness = 12;
+            let val = contrast * (gray - 128) + 128 + brightness;
+            val = Math.max(0, Math.min(255, val));
+            
+            pixels[i] = val;
+            pixels[i+1] = val;
+            pixels[i+2] = val;
+          }
+        } else if (filterName === 'grayscale') {
+          // Smooth grayscale filter
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = pixels[i];
+            const g = pixels[i+1];
+            const b = pixels[i+2];
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            pixels[i] = gray;
+            pixels[i+1] = gray;
+            pixels[i+2] = gray;
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        const filteredUrl = canvas.toDataURL('image/jpeg', 0.85);
+        
+        // Update state and IndexedDB
+        setLightboxReceipt(prev => prev ? { ...prev, url: filteredUrl } : null);
+        await saveReceipt(lightboxReceipt.id, filteredUrl);
+      }
+    };
+  };
+
+  const handleExportPDF = () => {
+    if (!lightboxReceipt) return;
+    playHaptic('success');
+    try {
+      const jspdfLib = (window as unknown as {
+        jspdf: {
+          jsPDF: new (options?: {
+            orientation?: string;
+            unit?: string;
+            format?: string;
+          }) => {
+            internal: {
+              pageSize: {
+                getWidth: () => number;
+                getHeight: () => number;
+              };
+            };
+            addImage: (
+              src: string,
+              format: string,
+              x: number,
+              y: number,
+              w: number,
+              h: number
+            ) => void;
+            save: (filename: string) => void;
+          };
+        };
+      }).jspdf;
+      const pdf = new jspdfLib.jsPDF({
+        orientation: 'portrait',
+        unit: 'pt',
+        format: 'a4'
+      });
+
+      const img = new Image();
+      img.src = lightboxReceipt.url;
+      img.onload = () => {
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        
+        const margin = 40;
+        const maxW = pageWidth - margin * 2;
+        const maxH = pageHeight - margin * 2;
+        
+        let width = img.width;
+        let height = img.height;
+        const ratio = width / height;
+        
+        if (width > maxW) {
+          width = maxW;
+          height = width / ratio;
+        }
+        if (height > maxH) {
+          height = maxH;
+          width = height * ratio;
+        }
+        
+        const x = (pageWidth - width) / 2;
+        const y = (pageHeight - height) / 2;
+        
+        pdf.addImage(lightboxReceipt.url, 'JPEG', x, y, width, height);
+        pdf.save(`scanned_document_${lightboxReceipt.id}.pdf`);
+      };
+    } catch (err) {
+      console.error("Failed to export PDF:", err);
+      alert("Failed to export PDF document.");
     }
   };
 
@@ -1988,20 +2471,33 @@ export default function App() {
           {/* Extracted Input Form */}
           <div className="relative">
             {isScanning && (
-              <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
-                <div className={`w-full max-w-sm p-6 rounded-[2.5rem] flex flex-col items-center border shadow-2xl relative overflow-hidden transition-all
-                                 ${isDarkMode ? 'bg-slate-900/90 border-slate-800 text-white' : 'bg-white/95 border-slate-200 text-slate-800'}`}>
-                  <div className="relative w-12 h-12 flex items-center justify-center mb-4">
-                    <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800" />
+              <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-in fade-in">
+                <div className={`w-full max-w-sm p-8 rounded-[2.5rem] flex flex-col items-center border shadow-3xl relative overflow-hidden transition-all
+                                 ${isDarkMode ? 'bg-[#090b15]/95 border-white/10 text-white' : 'bg-white/95 border-slate-200 text-slate-800'}`}>
+                  {/* Decorative blur blob */}
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl pointer-events-none" />
+                  
+                  {/* Animated Scanner Radar / Spinner */}
+                  <div className="relative w-16 h-16 flex items-center justify-center mb-6">
+                    <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800/60" />
                     <div className="absolute inset-0 rounded-full border-4 border-indigo-500 border-t-transparent animate-spin" />
-                    <span className="material-symbols-outlined text-indigo-500 text-[20px] font-bold">attach_file</span>
+                    <span className="material-symbols-outlined text-indigo-500 text-[26px] font-bold">document_scanner</span>
                   </div>
-                  <h3 className={`text-base font-extrabold tracking-tight mb-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
-                    Processing Receipt
+
+                  <h3 className={`text-lg font-extrabold tracking-tight mb-2 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                    AI Receipt Scanning
                   </h3>
-                  <p className={`text-xs font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                    Attaching image to transaction...
+                  
+                  {/* Dynamic Status Ticker */}
+                  <p className={`text-sm font-medium ${isDarkMode ? 'text-slate-300' : 'text-slate-600'} text-center min-h-[20px] transition-all`}>
+                    {scanStatus}
                   </p>
+                  
+                  {/* Pulsing indicator */}
+                  <div className="mt-5 flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 uppercase tracking-wider animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-ping" />
+                    AI Processing Active
+                  </div>
                 </div>
               </div>
             )}
@@ -2313,22 +2809,29 @@ export default function App() {
         </div>
       </div>
 
-      {/* Receipt Lightbox Modal */}
+      {/* Receipt Lightbox Modal - CamScanner Workspace */}
       {lightboxReceipt && (
         <div 
           className="fixed inset-0 z-50 bg-[#070913]/90 backdrop-blur-xl flex flex-col items-center justify-center p-4 md:p-6 animate-in fade-in duration-300"
           onClick={() => setLightboxReceipt(null)}
         >
           <div 
-            className="flex flex-col items-center max-w-md w-full bg-slate-900/85 backdrop-blur-md border border-white/10 rounded-[2rem] shadow-3xl overflow-hidden animate-in scale-in duration-300" 
+            className="flex flex-col items-center max-w-md w-full bg-slate-900/80 backdrop-blur-md border border-white/10 rounded-[2.5rem] shadow-3xl overflow-hidden animate-in scale-in duration-300" 
             onClick={e => e.stopPropagation()}
           >
             {/* Header bar */}
             <div className="w-full flex items-center justify-between p-5 border-b border-white/5 bg-slate-950/40">
               <div className="flex flex-col text-left">
-                <span className="text-[10px] font-bold text-indigo-400 tracking-wider uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20 w-fit">
-                  Receipt Viewer
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-[#00bfa5] tracking-wider uppercase bg-[#00bfa5]/10 px-2 py-0.5 rounded-full border border-[#00bfa5]/20">
+                    CamScanner Mode
+                  </span>
+                  {lightboxActiveFilter !== 'original' && (
+                    <span className="text-[10px] font-bold text-indigo-400 tracking-wider uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                      Enhanced
+                    </span>
+                  )}
+                </div>
                 <h3 className="text-sm font-extrabold text-white truncate max-w-[220px] mt-1.5">{lightboxReceipt.title}</h3>
               </div>
               <button 
@@ -2340,12 +2843,54 @@ export default function App() {
             </div>
             
             {/* Image Preview Area */}
-            <div className="relative w-full p-6 flex items-center justify-center bg-slate-950/60 min-h-[40vh] max-h-[50vh] overflow-hidden border-b border-white/5">
+            <div className="relative w-full p-6 flex items-center justify-center bg-slate-950/60 min-h-[35vh] max-h-[45vh] overflow-hidden border-b border-white/5">
+              {/* Corner decos to make it look like a real document crop area */}
+              <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-[#00bfa5]/80 rounded-tl-sm"></div>
+              <div className="absolute top-4 right-4 w-4 h-4 border-t-2 border-r-2 border-[#00bfa5]/80 rounded-tr-sm"></div>
+              <div className="absolute bottom-4 left-4 w-4 h-4 border-b-2 border-l-2 border-[#00bfa5]/80 rounded-bl-sm"></div>
+              <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-[#00bfa5]/80 rounded-br-sm"></div>
+              
               <img 
                 src={lightboxReceipt.url} 
-                alt="Receipt Document" 
-                className="max-w-full max-h-[44vh] object-contain rounded-xl shadow-2xl select-none border border-white/5"
+                alt="Receipt Scan" 
+                className="max-w-full max-h-[38vh] object-contain rounded-xl shadow-2xl select-none transition-all duration-300 border border-white/5"
               />
+            </div>
+
+            {/* Filter Selection Panel */}
+            <div className="w-full p-5 bg-slate-950/20 flex flex-col gap-3">
+              <span className="text-[11px] font-bold text-slate-400 tracking-wider uppercase px-1">Filter Preset</span>
+              <div className="grid grid-cols-4 gap-2 w-full">
+                {([
+                  { id: 'original', name: 'Original', icon: 'image', desc: 'Raw Photo' },
+                  { id: 'magic', name: 'Magic', icon: 'auto_fix_high', desc: 'Contrast' },
+                  { id: 'bw', name: 'B&W', icon: 'contrast', desc: 'Monochrome' },
+                  { id: 'grayscale', name: 'Grayscale', icon: 'gradient', desc: 'Smooth' }
+                ] as const).map((f) => {
+                  const isActive = lightboxActiveFilter === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => handleApplyLightboxFilter(f.id)}
+                      className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border transition-all duration-300 cursor-pointer select-none bg-slate-900/60
+                        ${isActive 
+                          ? 'border-[#00bfa5] bg-gradient-to-b from-[#00bfa5]/10 to-[#00bfa5]/0 text-white shadow-[0_0_12px_rgba(0,191,165,0.15)] hover:bg-[#00bfa5]/15' 
+                          : 'border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10 hover:bg-slate-900'}`}
+                    >
+                      <div 
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300
+                          ${isActive ? 'bg-[#00bfa5]/20 text-[#00bfa5]' : 'bg-white/5 text-slate-400'}`}
+                      >
+                        <span className="material-symbols-outlined text-[20px]">{f.icon}</span>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] font-bold tracking-tight leading-none">{f.name}</p>
+                        <p className="text-[8px] text-slate-500 font-medium leading-none mt-0.5">{f.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Bottom Actions Bar */}
@@ -2367,19 +2912,17 @@ export default function App() {
               </button>
               
               <div className="flex items-center gap-2.5 flex-1 justify-end">
-                <a 
-                  href={lightboxReceipt.url} 
-                  download={`receipt_${lightboxReceipt.id}.jpg`}
-                  onClick={() => playHaptic('success')}
-                  className="flex items-center gap-1.5 px-4 h-11 rounded-2xl text-xs font-bold bg-slate-800 hover:bg-slate-750 text-white transition-all duration-200 cursor-pointer no-underline border border-white/5 hover:border-white/10 active:scale-95"
+                <button 
+                  onClick={handleExportPDF}
+                  className="flex items-center gap-1.5 px-4 h-11 rounded-2xl text-xs font-bold bg-slate-800 hover:bg-slate-750 text-white transition-all duration-200 cursor-pointer border border-white/5 hover:border-white/10 active:scale-95"
                 >
-                  <span className="material-symbols-outlined text-[16px]">download</span>
-                  Save JPEG
-                </a>
+                  <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
+                  Export PDF
+                </button>
                 
                 <button 
                   onClick={() => { playHaptic('success'); setLightboxReceipt(null); }}
-                  className="flex items-center gap-1.5 px-5 h-11 rounded-2xl text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(99,102,241,0.2)] active:scale-95"
+                  className="flex items-center gap-1.5 px-5 h-11 rounded-2xl text-xs font-bold bg-gradient-to-r from-[#00bfa5] to-emerald-500 hover:from-[#00d4b8] hover:to-emerald-400 text-white transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(0,191,165,0.2)] hover:shadow-[0_4px_16px_rgba(0,191,165,0.3)] active:scale-95"
                 >
                   Done
                 </button>
