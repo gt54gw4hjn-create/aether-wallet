@@ -9,15 +9,14 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
-// Currency configurations
 const CURRENCIES = [
   { code: 'MYR', symbol: 'RM', locale: 'en-MY' },
   { code: 'USD', symbol: '$', locale: 'en-US' },
-  { code: 'EUR', symbol: 'â‚¬', locale: 'de-DE' },
+  { code: 'EUR', symbol: '€', locale: 'de-DE' },
   { code: 'SGD', symbol: 'S$', locale: 'en-SG' },
-  { code: 'GBP', symbol: 'Â£', locale: 'en-GB' },
-  { code: 'JPY', symbol: 'Â¥', locale: 'ja-JP' },
-  { code: 'CNY', symbol: 'Â¥', locale: 'zh-CN' }
+  { code: 'GBP', symbol: '£', locale: 'en-GB' },
+  { code: 'JPY', symbol: '¥', locale: 'ja-JP' },
+  { code: 'CNY', symbol: '¥', locale: 'zh-CN' }
 ];
 
 const getCurrencySymbol = (code: string) => {
@@ -27,9 +26,18 @@ const getCurrencySymbol = (code: string) => {
 
 // Formatter for currency
 const formatCurrency = (amount: number, code: string = 'MYR') => {
-  const match = CURRENCIES.find(c => c.code === code);
-  const locale = match ? match.locale : 'en-MY';
-  return new Intl.NumberFormat(locale, { style: 'currency', currency: code }).format(amount);
+  try {
+    const safeAmount = typeof amount === 'number' && !isNaN(amount) ? amount : parseFloat(String(amount)) || 0;
+    const match = CURRENCIES.find(c => c.code === code);
+    const locale = match ? match.locale : 'en-US';
+    return new Intl.NumberFormat(locale, { style: 'currency', currency: code }).format(safeAmount);
+  } catch (e) {
+    console.error("formatCurrency error, using fallback:", e);
+    const safeAmount = typeof amount === 'number' && !isNaN(amount) ? amount : parseFloat(String(amount)) || 0;
+    const match = CURRENCIES.find(c => c.code === code);
+    const symbol = match ? match.symbol : 'RM';
+    return `${symbol} ${safeAmount.toFixed(2)}`;
+  }
 };
 
 // Helper to format 24h time string (e.g. "18:15") to 12h format (e.g. "6:15 PM")
@@ -1485,7 +1493,7 @@ export default function App() {
             };
             
             return (
-              <div className={`flex-1 flex flex-col p-6 space-y-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
+              <div className={`flex-1 shrink-0 flex flex-col p-6 space-y-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
                 {/* Commitment Cards */}
                 <div className="grid grid-cols-2 gap-4">
                   <div className={`p-4 rounded-3xl border flex flex-col justify-between h-32 relative overflow-hidden transition-all hover:shadow-md ${isDarkMode ? 'bg-slate-900/50 border-amber-500/10' : 'bg-amber-50/20 border-amber-200'}`}>
@@ -1639,7 +1647,7 @@ export default function App() {
               const projectTotal = projectExpenses.reduce((acc, curr) => acc + curr.amount, 0);
               
               return (
-                <div className={`flex-1 flex flex-col p-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
+                <div className={`flex-1 shrink-0 flex flex-col p-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
                   {/* Detail Header */}
                   <div className="flex items-center justify-between mb-6">
                     <button
@@ -1721,7 +1729,7 @@ export default function App() {
             
             // Otherwise, render list of projects
             return (
-              <div className={`flex-1 flex flex-col p-6 space-y-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
+              <div className={`flex-1 shrink-0 flex flex-col p-6 space-y-6 pb-24 ${isDarkMode ? 'bg-black/20' : 'bg-slate-50/50'}`}>
                 
                 {/* Project Creator Card */}
                 <div className={`p-4 rounded-3xl border flex flex-col gap-3 transition-all ${isDarkMode ? 'bg-slate-900/30 border-slate-800' : 'bg-white border-slate-200/60 shadow-sm'}`}>

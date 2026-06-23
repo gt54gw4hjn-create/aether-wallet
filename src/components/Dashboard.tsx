@@ -108,6 +108,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       style={{
         padding: '1rem',
         paddingBottom: '6rem',
+        flexShrink: 0,
         ...themeVars,
       }}
     >
