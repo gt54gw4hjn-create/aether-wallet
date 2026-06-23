@@ -72,10 +72,10 @@ const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode, category
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
                   <span style={{ fontSize: '0.72rem', fontWeight: 600, color: valueColor }}>{cat.label}</span>
                   <span style={{ fontSize: '0.72rem', fontWeight: 700, color: barColor }}>
-                    {currencySymbol}{cat.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {currencySymbol}{cat.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     {hasLimit && (
                       <span style={{ fontWeight: 500, fontSize: '0.65rem', opacity: 0.6, marginLeft: '3px' }}>
-                        / {currencySymbol}{limit.toLocaleString()}
+                        / {currencySymbol}{limit.toLocaleString('en-US')}
                       </span>
                     )}
                   </span>

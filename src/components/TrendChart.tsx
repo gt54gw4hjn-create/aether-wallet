@@ -29,7 +29,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ expenses, isDarkMode, currencyS
       .reduce((sum, e) => sum + e.amount, 0);
     
     // Format label as "Mon 15"
-    const dayLabel = date.toLocaleDateString(undefined, { weekday: 'short' });
+    const dayLabel = date.toLocaleDateString('en-US', { weekday: 'short' });
     const dayNum = date.getDate();
     return {
       dateLabel: `${dayLabel} ${dayNum}`,

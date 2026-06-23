@@ -6,6 +6,14 @@ import TrendChart from './TrendChart';
 import { calculateBalance } from '../utils/balance';
 import type { Category, Expense } from '../types';
 
+// Robustly parse stored expense dates (ISO "2026-06-22" or legacy "22/6/2026" / "6/22/2026")
+const parseDate = (dateStr: string): Date => {
+  if (!dateStr) return new Date(NaN);
+  const isoMatch = dateStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) return new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+  return new Date(dateStr);
+};
+
 interface DashboardProps {
   expenses: Expense[];
   isDarkMode: boolean;
@@ -51,7 +59,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   // ── Insights ──────────────────────────────────────────────────────────────
   const now = new Date();
   const thisMonthExp = expenses.filter((e) => {
-    const d = new Date(e.date);
+    const d = parseDate(e.date);
     return !isNaN(d.getTime()) && d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
   });
   const mtdTotal = thisMonthExp.reduce((s, e) => s + e.amount, 0);
@@ -59,8 +67,8 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const daySums = Array(7).fill(0);
   expenses.forEach((e) => {
-    const d = new Date(e.date);
-    if (!isNaN(d.getDay())) daySums[d.getDay()] += e.amount;
+    const d = parseDate(e.date);
+    if (!isNaN(d.getTime())) daySums[d.getDay()] += e.amount;
   });
   const peakDayIdx = daySums.indexOf(Math.max(...daySums));
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];

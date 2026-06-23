@@ -61,7 +61,7 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
               {isOverBudget ? '⚠️ Near limit' : 'Budget used'}
             </span>
             <span style={{ fontSize:'0.65rem', color:'rgba(255,255,255,0.75)', fontWeight:700 }}>
-              {currencySymbol}{remaining.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})} left
+              {currencySymbol}{remaining.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})} left
             </span>
           </div>
           {/* Track */}
@@ -75,7 +75,7 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
           </div>
           <div style={{ display:'flex', justifyContent:'space-between', marginTop:'0.25rem' }}>
             <span style={{ fontSize:'0.6rem', color:'rgba(255,255,255,0.45)' }}>{currencySymbol}0</span>
-            <span style={{ fontSize:'0.6rem', color:'rgba(255,255,255,0.45)' }}>{currencySymbol}{budgetLimit.toLocaleString()}</span>
+            <span style={{ fontSize:'0.6rem', color:'rgba(255,255,255,0.45)' }}>{currencySymbol}{budgetLimit.toLocaleString('en-US')}</span>
           </div>
         </div>
       )}

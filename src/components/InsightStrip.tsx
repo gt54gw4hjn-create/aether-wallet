@@ -25,7 +25,7 @@ const InsightStrip: React.FC<InsightStripProps> = ({ dailyAvg, peakDay, thisMont
       icon: 'trending_up',
       iconColor: '#10b981',
       label: 'This Month',
-      value: `${currencySymbol}${thisMonthTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: `${currencySymbol}${thisMonthTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
     },
     {
       icon: 'event',

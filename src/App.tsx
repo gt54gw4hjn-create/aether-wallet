@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { saveReceipt, getReceipt, deleteReceipt, getAllReceipts, restoreReceipts } from './db';
 import Dashboard from './components/Dashboard';
 
@@ -43,6 +43,20 @@ const formatTime12h = (time24?: string) => {
   hours = hours ? hours : 12; // the hour '0' should be '12'
   return `${hours}:${minutesStr} ${ampm}`;
 };
+
+// Robustly parse a stored expense date (handles both ISO "2026-06-22" and legacy "6/22/2026" / "22/6/2026")
+const parseExpenseDate = (dateStr: string): Date => {
+  if (!dateStr) return new Date(NaN);
+  // ISO format: YYYY-MM-DD → parse with explicit parts to avoid timezone shift
+  const isoMatch = dateStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (isoMatch) {
+    return new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+  }
+  // Legacy localized format: try native parsing as fallback
+  const d = new Date(dateStr);
+  return d;
+};
+
 
 interface ConfettiParticle {
   x: number;
@@ -592,8 +606,7 @@ export default function App() {
     const cat = categories.find(c => c.id === selectedCategory);
     const finalTitle = titleInput.trim() || cat?.label || 'Expense';
 
-    const [year, month, day] = dateInput.split('-');
-    const formattedDate = new Date(parseInt(year), parseInt(month) - 1, parseInt(day)).toLocaleDateString();
+    const formattedDate = dateInput; // Store as ISO YYYY-MM-DD for reliable date comparisons
 
     let updatedExpensesList: Expense[];
 
@@ -684,7 +697,7 @@ export default function App() {
     setAmountInput(exp.amount.toString());
     setTitleInput(exp.title);
     setSelectedCategory(exp.categoryId);
-    const d = new Date(exp.date);
+    const d = parseExpenseDate(exp.date);
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
     const dd = String(d.getDate()).padStart(2, '0');
@@ -1556,7 +1569,7 @@ export default function App() {
                   return (
                     <div className="flex flex-col gap-2">
                       <h3 className={`text-xs font-bold uppercase tracking-wider pl-1 mb-1 ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
-                        Bills Due on {targetDay.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                        Bills Due on {targetDay.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
                       </h3>
                       {dues.length === 0 ? (
                         <div className={`text-center py-6 rounded-2xl border border-dashed text-xs ${isDarkMode ? 'border-slate-800 text-slate-500' : 'border-slate-200 text-slate-400'}`}>
