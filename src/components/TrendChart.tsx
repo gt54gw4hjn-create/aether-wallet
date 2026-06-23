@@ -7,6 +7,13 @@ interface TrendChartProps {
   currencySymbol: string;
 }
 
+const getLocalDateString = (d: Date): string => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
 const TrendChart: React.FC<TrendChartProps> = ({ expenses, isDarkMode, currencySymbol }) => {
   const panelBg = isDarkMode ? 'rgba(30,41,59,0.55)' : 'rgba(255,255,255,0.6)';
   const panelBorder = isDarkMode ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)';
@@ -23,7 +30,7 @@ const TrendChart: React.FC<TrendChartProps> = ({ expenses, isDarkMode, currencyS
 
   // 2. Sum up expenses for each day (excluding future or non-matching dates)
   const dailyTotals = dates.map(date => {
-    const dateStr = date.toISOString().split('T')[0];
+    const dateStr = getLocalDateString(date);
     const total = expenses
       .filter(e => e.date === dateStr)
       .reduce((sum, e) => sum + e.amount, 0);

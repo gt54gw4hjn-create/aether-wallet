@@ -57,6 +57,15 @@ const parseExpenseDate = (dateStr: string): Date => {
   return d;
 };
 
+// Helper to get local date string YYYY-MM-DD to avoid timezone offset shifts
+const getLocalDateString = (d: Date = new Date()): string => {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+
 
 interface ConfettiParticle {
   x: number;
@@ -162,7 +171,7 @@ export default function App() {
   const [titleInput, setTitleInput] = useState('');
   
   // New: Date State defaulting to today (YYYY-MM-DD)
-  const [dateInput, setDateInput] = useState(() => new Date().toISOString().split('T')[0]);
+  const [dateInput, setDateInput] = useState(() => getLocalDateString());
 
   // New: Time State defaulting to now (HH:MM in 24h format)
   const [timeInput, setTimeInput] = useState(() => {
@@ -586,7 +595,7 @@ export default function App() {
     setAmountInput('');
     setTitleInput('');
     setSelectedCategory('food');
-    setDateInput(new Date().toISOString().split('T')[0]);
+    setDateInput(getLocalDateString());
     setTimeInput(() => {
       const now = new Date();
       return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -679,7 +688,7 @@ export default function App() {
 
     setAmountInput('');
     setTitleInput('');
-    setDateInput(new Date().toISOString().split('T')[0]);
+    setDateInput(getLocalDateString());
     setTimeInput(() => {
       const now = new Date();
       return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -1005,7 +1014,7 @@ export default function App() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `expenses_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute("download", `expenses_${getLocalDateString()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1058,7 +1067,7 @@ export default function App() {
           id: 'exp_' + Math.random().toString(36).substring(2, 11),
           title: titleVal || 'Imported Expense',
           amount: parsedAmount,
-          date: dateVal || new Date().toISOString().split('T')[0],
+          date: dateVal || getLocalDateString(),
           categoryId,
           scopeType: 'one-off'
         });
@@ -1099,7 +1108,7 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.setAttribute("href", url);
-      link.setAttribute("download", `timmy_backup_${new Date().toISOString().split('T')[0]}.json`);
+      link.setAttribute("download", `timmy_backup_${getLocalDateString()}.json`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1142,7 +1151,7 @@ export default function App() {
         id: String(exp.id || Math.random().toString(36).substring(2, 9)),
         title: String(exp.title || 'Expense'),
         amount: Math.max(0, parseFloat(String(exp.amount)) || 0),
-        date: String(exp.date || new Date().toISOString().split('T')[0]),
+        date: String(exp.date || getLocalDateString()),
         time: exp.time ? String(exp.time) : undefined,
         categoryId: String(exp.categoryId || 'other'),
         hasReceipt: !!exp.hasReceipt,
@@ -1463,12 +1472,12 @@ export default function App() {
               const dayOfMonth = date.getDate();
               
               const dueWeekly = weeklyItems.filter(exp => {
-                const expDate = new Date(exp.date);
+                const expDate = parseExpenseDate(exp.date);
                 return !isNaN(expDate.getTime()) && expDate.getDay() === dayOfWeek;
               });
               
               const dueMonthly = monthlyItems.filter(exp => {
-                const expDate = new Date(exp.date);
+                const expDate = parseExpenseDate(exp.date);
                 return !isNaN(expDate.getTime()) && expDate.getDate() === dayOfMonth;
               });
               
