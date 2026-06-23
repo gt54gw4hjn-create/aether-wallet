@@ -473,6 +473,7 @@ export default function App() {
 
 
   // V4 Custom States for Receipts and Swiping
+  const [isFabAnimating, setIsFabAnimating] = useState(false);
   const [scannedImage, setScannedImage] = useState<string | null>(null);
   const [lightboxReceipt, setLightboxReceipt] = useState<{ url: string; title: string; id: string } | null>(null);
   const [swipeActiveId, setSwipeActiveId] = useState<string | null>(null);
@@ -941,6 +942,12 @@ If the document corners are not clear, return a safe estimation covering the mai
     setNewProjectName('');
     setScannedImage(null);
     setIsBottomSheetOpen(true);
+  };
+
+  const handleFabClick = () => {
+    setIsFabAnimating(true);
+    setTimeout(() => setIsFabAnimating(false), 600);
+    handleOpenNewBottomSheet();
   };
 
   const handleAddExpense = async (e: React.FormEvent) => {
@@ -2275,10 +2282,11 @@ If the document corners are not clear, return a safe estimation covering the mai
       
       {!isBulkMode ? (
         <button 
-          onClick={handleOpenNewBottomSheet}
-          className={`fixed bottom-8 right-8 md:bottom-12 md:right-[calc(50vw-200px)] w-14 h-14 rounded-full shadow-lg active:scale-[0.93] apple-btn-spring flex items-center justify-center z-40 border-0 cursor-pointer ${isDarkMode ? 'bg-blue-600 text-white shadow-blue-600/25 hover:bg-blue-700' : 'bg-blue-600 text-white shadow-blue-600/20 hover:bg-blue-700'} group`}
+          onClick={handleFabClick}
+          className={`fixed bottom-8 right-8 md:bottom-12 md:right-[calc(50vw-200px)] w-14 h-14 rounded-full shadow-lg flex items-center justify-center z-40 border-0 cursor-pointer ${isDarkMode ? 'bg-blue-600 text-white shadow-blue-600/25 hover:bg-blue-700' : 'bg-blue-600 text-white shadow-blue-600/20 hover:bg-blue-700'} 
+            ${isFabAnimating ? 'animate-fab-bounce' : 'active:scale-[0.93] apple-btn-spring'}`}
         >
-          <span className="material-symbols-outlined text-3xl transition-transform duration-500 ease-[cubic-bezier(0.34,1.56,0.64,1)] group-active:rotate-90 select-none">add</span>
+          <span className={`material-symbols-outlined text-3xl select-none ${isFabAnimating ? 'animate-plus-spin' : ''}`}>add</span>
         </button>
       ) : (
         <div className={`fixed bottom-8 left-1/2 -translate-x-1/2 w-[calc(100%-3rem)] max-w-md z-45 p-4 rounded-2xl border backdrop-blur-xl shadow-lg flex flex-col gap-3 animate-in fade-in slide-in-from-bottom-5 duration-300
