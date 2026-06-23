@@ -1955,17 +1955,23 @@ export default function App() {
                 )}
                 <div className="flex items-baseline gap-2">
                   <span className={`text-3xl font-bold ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>{getCurrencySymbol(currency)}</span>
-                  <input 
-                    type="text" 
-                    value={amountInput}
-                    onChange={(e) => setAmountInput(e.target.value)}
-                    placeholder="0.00"
-                    readOnly
-                    inputMode="none"
-                    className={`w-full max-w-[200px] text-center text-7xl font-bold bg-transparent border-none outline-none p-0 m-0 transition-all 
-                               ${isDarkMode ? 'text-slate-200 placeholder-slate-700' : 'text-slate-800 placeholder-slate-300'}
+                  <div 
+                    className={`w-full max-w-[280px] text-center text-6xl font-bold bg-transparent border-none outline-none p-0 m-0 transition-all select-none
+                               ${amountInput ? (isDarkMode ? 'text-slate-200' : 'text-slate-800') : (isDarkMode ? 'text-slate-700' : 'text-slate-300')}
                                ${scannedImage ? 'text-indigo-500 dark:text-indigo-400 drop-shadow-[0_0_12px_rgba(99,102,241,0.3)] animate-pulse' : ''}`}
-                  />
+                    style={{ 
+                      minHeight: '72px', 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      justifyContent: 'center',
+                      lineHeight: '1',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}
+                  >
+                    {amountInput || '0.00'}
+                  </div>
                 </div>
                 
                 {/* AI Scanner Button */}
