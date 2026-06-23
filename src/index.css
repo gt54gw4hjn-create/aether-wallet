@@ -176,13 +176,7 @@ html, body {
 }
 .balance-card:hover { transform: translateY(-2px); }
 
-/* ─── CamScanner Laser & Red Alert Animations ───────────────────────────── */
-@keyframes scanLaser {
-  0% { top: 0%; opacity: 0.8; }
-  50% { top: 100%; opacity: 1; }
-  100% { top: 0%; opacity: 0.8; }
-}
-
+/* ─── Red Alert Animations ───────────────────────────── */
 @keyframes pulseRedGlow {
   0% { box-shadow: 0 20px 60px rgba(79,70,229,0.38), 0 0 0px rgba(239,68,68,0); }
   50% { box-shadow: 0 20px 60px rgba(79,70,229,0.38), 0 0 25px rgba(239, 68, 68, 0.7); }
