@@ -205,3 +205,37 @@ html, body {
   transition: none !important;
 }
 
+/* ─── Apple-Level Spring Animations ─── */
+@keyframes appleScaleIn {
+  0% { transform: scale(0.92); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes appleFadeIn {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+.apple-scale-in {
+  animation: appleScaleIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.apple-fade-in {
+  animation: appleFadeIn 0.4s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+}
+
+.apple-btn-active {
+  transition: transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94), background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease !important;
+}
+.apple-btn-active:active {
+  transform: scale(0.95) !important;
+}
+
+.apple-btn-spring {
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1), background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease !important;
+}
+.apple-btn-spring:active {
+  transform: scale(0.90) !important;
+}
+
+

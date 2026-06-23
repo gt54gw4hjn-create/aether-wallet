@@ -1754,13 +1754,13 @@ If the document corners are not clear, return a safe estimation covering the mai
           <div style={{ display: 'flex', gap: '0.4rem' }}>
             <button
               onClick={handleThemeToggle}
+              className="apple-btn-spring"
               style={{
                 width: '34px', height: '34px', borderRadius: '12px', border: 'none', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.8)',
                 color: isDarkMode ? '#fbbf24' : '#6366f1',
                 boxShadow: isDarkMode ? 'none' : '0 2px 8px rgba(99,102,241,0.15)',
-                transition: 'all 0.2s ease',
               }}
             >
               <span 
@@ -1777,13 +1777,13 @@ If the document corners are not clear, return a safe estimation covering the mai
             </button>
             <button
               onClick={() => { playHaptic('click'); setIsBudgetSheetOpen(true); }}
+              className="apple-btn-spring"
               style={{
                 width: '34px', height: '34px', borderRadius: '12px', border: 'none', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.8)',
                 color: isDarkMode ? '#a5b4fc' : '#6366f1',
                 boxShadow: isDarkMode ? 'none' : '0 2px 8px rgba(99,102,241,0.15)',
-                transition: 'all 0.2s ease',
               }}
             >
               <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>tune</span>
@@ -2276,7 +2276,7 @@ If the document corners are not clear, return a safe estimation covering the mai
       {!isBulkMode ? (
         <button 
           onClick={handleOpenNewBottomSheet}
-          className={`fixed bottom-8 right-8 md:bottom-12 md:right-[calc(50vw-200px)] w-14 h-14 rounded-full shadow-lg hover:shadow-xl hover:-translate-y-1 active:scale-95 transition-all flex items-center justify-center z-40 border-0 cursor-pointer ${isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}`}
+          className={`fixed bottom-8 right-8 md:bottom-12 md:right-[calc(50vw-200px)] w-14 h-14 rounded-full shadow-lg hover:shadow-xl hover:scale-105 active:scale-90 apple-btn-spring flex items-center justify-center z-40 border-0 cursor-pointer ${isDarkMode ? 'bg-blue-600 text-white' : 'bg-blue-600 text-white'}`}
         >
           <span className="material-symbols-outlined text-3xl">add</span>
         </button>
@@ -2353,11 +2353,14 @@ If the document corners are not clear, return a safe estimation covering the mai
 
       {/* Bottom Sheet Overlay */}
       <div 
-        className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${isBottomSheetOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-sm transition-opacity duration-500 ${isBottomSheetOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         onClick={() => { playHaptic('click'); setIsBottomSheetOpen(false); setScannedImage(null); }}
       >
         <div 
-          className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md rounded-t-[2rem] p-6 pt-2 max-h-[85dvh] overflow-y-auto custom-scrollbar pb-10 transition-transform duration-300 transform ${isBottomSheetOpen ? 'translate-y-0 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]' : 'translate-y-full'} ${isDarkMode ? 'bg-slate-900 border-t border-slate-800' : 'bg-slate-50 border-t border-slate-200'}`}
+          className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md rounded-t-[2rem] p-6 pt-2 max-h-[85dvh] overflow-y-auto custom-scrollbar pb-10 transform ${isBottomSheetOpen ? 'translate-y-0 shadow-[0_-15px_50px_rgba(0,0,0,0.2)]' : 'translate-y-full'} ${isDarkMode ? 'bg-slate-900 border-t border-slate-800' : 'bg-slate-50 border-t border-slate-200'}`}
+          style={{
+            transition: 'transform 0.5s cubic-bezier(0.32, 0.94, 0.6, 1), background-color 0.3s ease, border-color 0.3s ease'
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Drag Handle */}
@@ -2446,7 +2449,7 @@ If the document corners are not clear, return a safe estimation covering the mai
                       key={key}
                       type="button"
                       onClick={() => handleNumpadPress(key)}
-                      className={`h-11 rounded-xl flex items-center justify-center font-bold text-lg select-none transition-all active:scale-90 border-0 cursor-pointer outline-none
+                      className={`h-11 rounded-xl flex items-center justify-center font-bold text-lg select-none border-0 cursor-pointer outline-none active:scale-[0.95] apple-btn-active
                         ${isDarkMode 
                           ? 'bg-slate-800/40 text-slate-200 hover:bg-slate-700/60 border border-slate-700/30' 
                           : 'bg-white/90 text-slate-800 hover:bg-slate-50 border border-slate-200/50 shadow-sm'}`}
@@ -2502,9 +2505,9 @@ If the document corners are not clear, return a safe estimation covering the mai
                         key={cat.id}
                         type="button"
                         onClick={() => { playHaptic('click'); setSelectedCategory(cat.id); }}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium transition-all cursor-pointer border-0 outline-none
+                        className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-medium cursor-pointer border-0 outline-none active:scale-[0.96] apple-btn-spring
                                   ${isSelected 
-                                    ? 'text-white shadow-md scale-105' 
+                                    ? 'text-white shadow-md' 
                                     : (isDarkMode ? 'bg-slate-800/80 text-slate-400 hover:bg-slate-700 hover:text-slate-300' : 'bg-white/80 text-slate-500 hover:bg-white hover:shadow-sm')}`}
                         style={{
                           backgroundColor: isSelected ? cat.color : undefined,
@@ -2543,7 +2546,7 @@ If the document corners are not clear, return a safe estimation covering the mai
                             setSelectedProjectId(projects[0].id);
                           }
                         }}
-                        className={`flex flex-col items-center gap-1 py-2 rounded-xl text-[10px] font-bold transition-all border-0 outline-none cursor-pointer
+                        className={`flex flex-col items-center gap-1 py-2 rounded-xl text-[10px] font-bold border-0 outline-none cursor-pointer active:scale-[0.94] apple-btn-active
                                   ${isSelected 
                                     ? (isDarkMode ? 'bg-slate-800 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm') 
                                     : (isDarkMode ? 'text-slate-500 hover:text-slate-400' : 'text-slate-500 hover:text-slate-600')}`}
@@ -2671,7 +2674,7 @@ If the document corners are not clear, return a safe estimation covering the mai
                         setIsBottomSheetOpen(false);
                       }
                     }}
-                    className={`flex-1 py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer border active:scale-[0.98] outline-none
+                    className={`flex-1 py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 cursor-pointer border active:scale-[0.95] apple-btn-spring outline-none
                                ${isDarkMode 
                                  ? 'border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400' 
                                  : 'border-red-200 bg-red-50 hover:bg-red-100 text-red-600'}`}
@@ -2681,7 +2684,7 @@ If the document corners are not clear, return a safe estimation covering the mai
                   </button>
                   <button 
                     type="submit" 
-                    className="flex-[2] py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer border-0 outline-none bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/25 active:scale-[0.98]"
+                    className="flex-[2] py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 cursor-pointer border-0 outline-none bg-amber-500 hover:bg-amber-600 text-white shadow-lg shadow-amber-500/25 active:scale-[0.94] apple-btn-spring"
                   >
                     <span className="material-symbols-outlined text-[20px]">check_circle</span>
                     Update Expense
@@ -2690,9 +2693,9 @@ If the document corners are not clear, return a safe estimation covering the mai
               ) : (
                 <button 
                   type="submit" 
-                  className={`w-full py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 transition-all cursor-pointer border-0 outline-none
+                  className={`w-full py-4 mb-2 rounded-2xl font-bold text-[15px] flex items-center justify-center gap-2 cursor-pointer border-0 outline-none active:scale-[0.94] apple-btn-spring
                             ${amountInput && parseFloat(amountInput) > 0 
-                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/25 active:scale-[0.98]'
+                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/25'
                               : (isDarkMode ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-slate-100 text-slate-400 cursor-not-allowed')}`}
                 >
                   <span className="material-symbols-outlined text-[20px]">add_circle</span>
@@ -2782,11 +2785,14 @@ If the document corners are not clear, return a safe estimation covering the mai
 
       {/* Budget Settings Sheet Overlay */}
       <div 
-        className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-sm transition-opacity duration-300 ${isBudgetSheetOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed inset-0 z-50 bg-black/40 backdrop-blur-sm transition-opacity duration-500 ${isBudgetSheetOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         onClick={() => { playHaptic('click'); setIsBudgetSheetOpen(false); }}
       >
         <div 
-          className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md rounded-t-[2rem] p-6 pt-2 transition-transform duration-300 transform ${isBudgetSheetOpen ? 'translate-y-0 shadow-[0_-10px_40px_rgba(0,0,0,0.1)]' : 'translate-y-full'} ${isDarkMode ? 'bg-slate-900 border-t border-slate-800' : 'bg-slate-50 border-t border-slate-200'}`}
+          className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md rounded-t-[2rem] p-6 pt-2 transform ${isBudgetSheetOpen ? 'translate-y-0 shadow-[0_-15px_50px_rgba(0,0,0,0.2)]' : 'translate-y-full'} ${isDarkMode ? 'bg-slate-900 border-t border-slate-800' : 'bg-slate-50 border-t border-slate-200'}`}
+          style={{
+            transition: 'transform 0.5s cubic-bezier(0.32, 0.94, 0.6, 1), background-color 0.3s ease, border-color 0.3s ease'
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Drag Handle */}
