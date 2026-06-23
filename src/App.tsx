@@ -107,6 +107,59 @@ const formatExpenseDate = (dateStr: string) => {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+interface ReceiptThumbnailProps {
+  id: string;
+  fallbackIcon: string;
+  fallbackColor: string;
+  isDarkMode: boolean;
+  onClickLightbox: () => void;
+}
+
+const ReceiptThumbnail: React.FC<ReceiptThumbnailProps> = ({ id, fallbackIcon, fallbackColor, isDarkMode, onClickLightbox }) => {
+  const [thumbUrl, setThumbUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    getReceipt(id).then(url => {
+      if (active && url) setThumbUrl(url);
+    });
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  if (thumbUrl) {
+    return (
+      <div 
+        onClick={(e) => {
+          e.stopPropagation();
+          onClickLightbox();
+        }}
+        className="w-11 h-11 rounded-2xl overflow-hidden border shrink-0 shadow-sm cursor-zoom-in transition-transform hover:scale-105 active:scale-95 z-20"
+        style={{
+          borderColor: isDarkMode ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.1)'
+        }}
+      >
+        <img src={thumbUrl} alt="Receipt crop" className="w-full h-full object-cover" />
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 transition-colors"
+      style={{ 
+        backgroundColor: isDarkMode ? `${fallbackColor}15` : `${fallbackColor}0D`,
+        borderColor: isDarkMode ? `${fallbackColor}30` : `${fallbackColor}20`
+      }}
+    >
+      <span className="material-symbols-outlined text-[20px] font-semibold" style={{ color: fallbackColor }}>
+        {fallbackIcon}
+      </span>
+    </div>
+  );
+};
+
 
 // Robustly parse a stored expense date (handles both ISO "2026-06-22" and legacy "6/22/2026" / "22/6/2026")
 const parseExpenseDate = (dateStr: string): Date => {
@@ -426,7 +479,10 @@ export default function App() {
 
   // V4 Custom States for Receipts and Swiping
   const [scannedImage, setScannedImage] = useState<string | null>(null);
+  const [rawCroppedImage, setRawCroppedImage] = useState<string | null>(null);
   const [lightboxReceipt, setLightboxReceipt] = useState<{ url: string; title: string; id: string } | null>(null);
+  const [lightboxRawUrl, setLightboxRawUrl] = useState<string | null>(null);
+  const [lightboxActiveFilter, setLightboxActiveFilter] = useState<'original' | 'magic' | 'bw' | 'grayscale'>('magic');
   const [swipeActiveId, setSwipeActiveId] = useState<string | null>(null);
   const [swipeDistance, setSwipeDistance] = useState<number>(0);
   const touchStartX = useRef<number>(0);
@@ -742,24 +798,29 @@ export default function App() {
           if (cCtx) {
             cCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
             
-            // Apply CamScanner filter (Grayscale + High Contrast + Brighten)
+            // Save the raw, unfiltered cropped color image
+            const rawCroppedUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
+            setRawCroppedImage(rawCroppedUrl);
+            
+            // Apply default CamScanner filter: Magic Color (Color contrast boost)
             const imgData = cCtx.getImageData(0, 0, targetW, targetH);
             if (imgData) {
               const pixels = imgData.data;
               for (let i = 0; i < pixels.length; i += 4) {
-                const r = pixels[i];
-                const g = pixels[i + 1];
-                const b = pixels[i + 2];
-                const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                const contrast = 1.6;
+                const brightness = 15;
                 
-                const contrast = 1.7;
-                const brightness = 12;
-                let newVal = contrast * (gray - 128) + 128 + brightness;
-                newVal = Math.max(0, Math.min(255, newVal));
+                let r = pixels[i];
+                let g = pixels[i + 1];
+                let b = pixels[i + 2];
                 
-                pixels[i] = newVal;
-                pixels[i + 1] = newVal;
-                pixels[i + 2] = newVal;
+                r = contrast * (r - 128) + 128 + brightness;
+                g = contrast * (g - 128) + 128 + brightness;
+                b = contrast * (b - 128) + 128 + brightness;
+                
+                pixels[i] = Math.max(0, Math.min(255, r));
+                pixels[i + 1] = Math.max(0, Math.min(255, g));
+                pixels[i + 2] = Math.max(0, Math.min(255, b));
               }
               cCtx.putImageData(imgData, 0, 0);
             }
@@ -767,6 +828,7 @@ export default function App() {
             const croppedUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
             processAndScanImage(croppedUrl);
           } else {
+            setRawCroppedImage(dataUrl);
             processAndScanImage(dataUrl);
           }
         } catch (err) {
@@ -845,8 +907,12 @@ export default function App() {
       
       if (scannedImage) {
         await saveReceipt(editingId, scannedImage);
+        if (rawCroppedImage) {
+          await saveReceipt(editingId + '_raw', rawCroppedImage);
+        }
       } else {
         await deleteReceipt(editingId);
+        await deleteReceipt(editingId + '_raw');
       }
       setEditingId(null);
     } else {
@@ -866,6 +932,9 @@ export default function App() {
       updatedExpensesList = [newExpense, ...expenses];
       if (scannedImage) {
         await saveReceipt(newId, scannedImage);
+        if (rawCroppedImage) {
+          await saveReceipt(newId + '_raw', rawCroppedImage);
+        }
       }
     }
 
@@ -1109,17 +1178,27 @@ export default function App() {
               </span>
             )}
             
-            <div 
-              className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 transition-colors"
-              style={{ 
-                backgroundColor: isDarkMode ? `${category.color}15` : `${category.color}0D`,
-                borderColor: isDarkMode ? `${category.color}30` : `${category.color}20`
-              }}
-            >
-              <span className="material-symbols-outlined text-[20px] font-semibold" style={{ color: category.color }}>
-                {category.icon}
-              </span>
-            </div>
+            {exp.hasReceipt ? (
+              <ReceiptThumbnail 
+                id={exp.id} 
+                fallbackIcon={category.icon} 
+                fallbackColor={category.color} 
+                isDarkMode={isDarkMode}
+                onClickLightbox={() => handleViewReceipt(exp.id, exp.title)}
+              />
+            ) : (
+              <div 
+                className="w-11 h-11 rounded-2xl flex items-center justify-center shadow-inner border shrink-0 transition-colors"
+                style={{ 
+                  backgroundColor: isDarkMode ? `${category.color}15` : `${category.color}0D`,
+                  borderColor: isDarkMode ? `${category.color}30` : `${category.color}20`
+                }}
+              >
+                <span className="material-symbols-outlined text-[20px] font-semibold" style={{ color: category.color }}>
+                  {category.icon}
+                </span>
+              </div>
+            )}
             <div className="flex flex-col">
               <div className="flex items-center gap-1.5">
                 <span className={`text-[15px] font-semibold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{exp.title}</span>
@@ -1496,12 +1575,95 @@ export default function App() {
   };
 
   const handleViewReceipt = async (id: string, title: string) => {
+    playHaptic('click');
     const img = await getReceipt(id);
+    const rawImg = await getReceipt(id + '_raw');
     if (img) {
       setLightboxReceipt({ url: img, title, id });
+      setLightboxRawUrl(rawImg || img); // Fall back to stored processed image if raw doesn't exist
+      setLightboxActiveFilter('magic'); // Default filter selection indicator
     } else {
       alert("Receipt image not found.");
     }
+  };
+
+  const handleApplyLightboxFilter = async (filterName: 'original' | 'magic' | 'bw' | 'grayscale') => {
+    if (!lightboxReceipt || !lightboxRawUrl) return;
+    playHaptic('success');
+    setLightboxActiveFilter(filterName);
+
+    // If 'original', no canvas filtering is needed, just save the raw image directly
+    if (filterName === 'original') {
+      setLightboxReceipt(prev => prev ? { ...prev, url: lightboxRawUrl } : null);
+      await saveReceipt(lightboxReceipt.id, lightboxRawUrl);
+      return;
+    }
+
+    const img = new Image();
+    img.src = lightboxRawUrl;
+    img.onload = async () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, img.width, img.height);
+        const pixels = imgData.data;
+
+        if (filterName === 'magic') {
+          // Magic Color contrast filter
+          const contrast = 1.6;
+          const brightness = 15;
+          for (let i = 0; i < pixels.length; i += 4) {
+            let r = pixels[i];
+            let g = pixels[i+1];
+            let b = pixels[i+2];
+            r = contrast * (r - 128) + 128 + brightness;
+            g = contrast * (g - 128) + 128 + brightness;
+            b = contrast * (b - 128) + 128 + brightness;
+            pixels[i] = Math.max(0, Math.min(255, r));
+            pixels[i+1] = Math.max(0, Math.min(255, g));
+            pixels[i+2] = Math.max(0, Math.min(255, b));
+          }
+        } else if (filterName === 'bw') {
+          // Monochrome high-contrast filter
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = pixels[i];
+            const g = pixels[i+1];
+            const b = pixels[i+2];
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            
+            const contrast = 1.7;
+            const brightness = 12;
+            let val = contrast * (gray - 128) + 128 + brightness;
+            val = Math.max(0, Math.min(255, val));
+            
+            pixels[i] = val;
+            pixels[i+1] = val;
+            pixels[i+2] = val;
+          }
+        } else if (filterName === 'grayscale') {
+          // Smooth grayscale filter
+          for (let i = 0; i < pixels.length; i += 4) {
+            const r = pixels[i];
+            const g = pixels[i+1];
+            const b = pixels[i+2];
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+            pixels[i] = gray;
+            pixels[i+1] = gray;
+            pixels[i+2] = gray;
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        const filteredUrl = canvas.toDataURL('image/jpeg', 0.85);
+        
+        // Update state and IndexedDB
+        setLightboxReceipt(prev => prev ? { ...prev, url: filteredUrl } : null);
+        await saveReceipt(lightboxReceipt.id, filteredUrl);
+      }
+    };
   };
 
   return (
@@ -2523,48 +2685,95 @@ export default function App() {
         </div>
       </div>
 
-      {/* Receipt Lightbox Modal */}
+      {/* Receipt Lightbox Modal - CamScanner Workspace */}
       {lightboxReceipt && (
         <div 
-          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-center p-4 animate-in fade-in"
+          className="fixed inset-0 z-50 bg-[#070913]/90 backdrop-blur-xl flex flex-col items-center justify-center p-4 md:p-6 animate-in fade-in duration-300"
           onClick={() => setLightboxReceipt(null)}
         >
-          {/* Close button */}
-          <button 
-            onClick={() => setLightboxReceipt(null)}
-            className="absolute top-6 right-6 p-3 rounded-full bg-slate-800/80 text-white border-0 cursor-pointer flex items-center justify-center hover:bg-slate-700 transition-colors z-50"
+          <div 
+            className="flex flex-col items-center max-w-md w-full bg-slate-900/80 backdrop-blur-md border border-white/10 rounded-[2.5rem] shadow-3xl overflow-hidden animate-in scale-in duration-300" 
+            onClick={e => e.stopPropagation()}
           >
-            <span className="material-symbols-outlined text-[24px]">close</span>
-          </button>
-          
-          <div className="flex flex-col items-center max-w-lg w-full gap-4" onClick={e => e.stopPropagation()}>
-            {/* Header info */}
-            <div className="text-center text-white px-4">
-              <h3 className="text-lg font-bold truncate max-w-[300px] mb-1">{lightboxReceipt.title}</h3>
-              <p className="text-xs text-slate-400">Local Receipt Backup</p>
+            {/* Header bar */}
+            <div className="w-full flex items-center justify-between p-5 border-b border-white/5 bg-slate-950/40">
+              <div className="flex flex-col text-left">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold text-[#00bfa5] tracking-wider uppercase bg-[#00bfa5]/10 px-2 py-0.5 rounded-full border border-[#00bfa5]/20">
+                    CamScanner Mode
+                  </span>
+                  {lightboxActiveFilter !== 'original' && (
+                    <span className="text-[10px] font-bold text-indigo-400 tracking-wider uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                      Enhanced
+                    </span>
+                  )}
+                </div>
+                <h3 className="text-sm font-extrabold text-white truncate max-w-[220px] mt-1.5">{lightboxReceipt.title}</h3>
+              </div>
+              <button 
+                onClick={() => { playHaptic('click'); setLightboxReceipt(null); }}
+                className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border-0 cursor-pointer flex items-center justify-center transition-all duration-200 hover:scale-105 active:scale-95"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
             </div>
             
-            {/* Image */}
-            <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-slate-900 flex items-center justify-center max-h-[70vh] w-full shadow-2xl">
+            {/* Image Preview Area */}
+            <div className="relative w-full p-6 flex items-center justify-center bg-slate-950/60 min-h-[35vh] max-h-[45vh] overflow-hidden border-b border-white/5">
+              {/* Corner decos to make it look like a real document crop area */}
+              <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-[#00bfa5]/80 rounded-tl-sm"></div>
+              <div className="absolute top-4 right-4 w-4 h-4 border-t-2 border-r-2 border-[#00bfa5]/80 rounded-tr-sm"></div>
+              <div className="absolute bottom-4 left-4 w-4 h-4 border-b-2 border-l-2 border-[#00bfa5]/80 rounded-bl-sm"></div>
+              <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-[#00bfa5]/80 rounded-br-sm"></div>
+              
               <img 
                 src={lightboxReceipt.url} 
-                alt="Receipt" 
-                className="max-w-full max-h-[65vh] object-contain select-none"
+                alt="Scanned Document" 
+                className="max-w-full max-h-[38vh] object-contain rounded-xl shadow-2xl select-none transition-all duration-300 border border-white/5"
               />
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-3 mt-2">
-              <a 
-                href={lightboxReceipt.url} 
-                download={`receipt_${lightboxReceipt.id}.jpg`}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-full text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white transition-colors cursor-pointer no-underline border-0"
-              >
-                <span className="material-symbols-outlined text-[16px]">download</span>
-                Save Image
-              </a>
+            {/* Filter Selection Panel */}
+            <div className="w-full p-5 bg-slate-950/20 flex flex-col gap-3">
+              <span className="text-[11px] font-bold text-slate-400 tracking-wider uppercase px-1">Filter Preset</span>
+              <div className="grid grid-cols-4 gap-2 w-full">
+                {([
+                  { id: 'original', name: 'Original', icon: 'image', desc: 'Raw Photo' },
+                  { id: 'magic', name: 'Magic', icon: 'auto_fix_high', desc: 'Contrast' },
+                  { id: 'bw', name: 'B&W', icon: 'contrast', desc: 'Monochrome' },
+                  { id: 'grayscale', name: 'Grayscale', icon: 'gradient', desc: 'Smooth' }
+                ] as const).map((f) => {
+                  const isActive = lightboxActiveFilter === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      onClick={() => handleApplyLightboxFilter(f.id)}
+                      className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border transition-all duration-300 cursor-pointer select-none bg-slate-900/60
+                        ${isActive 
+                          ? 'border-[#00bfa5] bg-gradient-to-b from-[#00bfa5]/10 to-[#00bfa5]/0 text-white shadow-[0_0_12px_rgba(0,191,165,0.15)] hover:bg-[#00bfa5]/15' 
+                          : 'border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10 hover:bg-slate-900'}`}
+                    >
+                      <div 
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300
+                          ${isActive ? 'bg-[#00bfa5]/20 text-[#00bfa5]' : 'bg-white/5 text-slate-400'}`}
+                      >
+                        <span className="material-symbols-outlined text-[20px]">{f.icon}</span>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[10px] font-bold tracking-tight leading-none">{f.name}</p>
+                        <p className="text-[8px] text-slate-500 font-medium leading-none mt-0.5">{f.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Bottom Actions Bar */}
+            <div className="w-full p-5 border-t border-white/5 bg-slate-950/40 flex items-center justify-between gap-3">
               <button 
                 onClick={async () => {
+                  playHaptic('click');
                   if (confirm('Delete this receipt attachment?')) {
                     await deleteReceipt(lightboxReceipt.id);
                     setExpenses(expenses.map(exp => exp.id === lightboxReceipt.id ? { ...exp, hasReceipt: false } : exp));
@@ -2572,11 +2781,30 @@ export default function App() {
                     if (editingId === lightboxReceipt.id) setScannedImage(null);
                   }
                 }}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-full text-xs font-semibold bg-red-950/40 border border-red-900/50 hover:bg-red-900/50 text-red-400 transition-colors cursor-pointer"
+                className="flex items-center justify-center w-11 h-11 rounded-2xl bg-red-950/30 border border-red-900/30 hover:border-red-800 hover:bg-red-900/40 text-red-400 transition-all duration-200 cursor-pointer"
+                title="Delete Scan"
               >
-                <span className="material-symbols-outlined text-[16px]">delete</span>
-                Delete Receipt
+                <span className="material-symbols-outlined text-[20px]">delete</span>
               </button>
+              
+              <div className="flex items-center gap-2.5 flex-1 justify-end">
+                <a 
+                  href={lightboxReceipt.url} 
+                  download={`receipt_${lightboxReceipt.id}.jpg`}
+                  onClick={() => playHaptic('success')}
+                  className="flex items-center gap-1.5 px-4 h-11 rounded-2xl text-xs font-bold bg-slate-800 hover:bg-slate-750 text-white transition-all duration-200 cursor-pointer no-underline border border-white/5 hover:border-white/10 active:scale-95"
+                >
+                  <span className="material-symbols-outlined text-[16px]">download</span>
+                  Save JPEG
+                </a>
+                
+                <button 
+                  onClick={() => { playHaptic('success'); setLightboxReceipt(null); }}
+                  className="flex items-center gap-1.5 px-5 h-11 rounded-2xl text-xs font-bold bg-gradient-to-r from-[#00bfa5] to-emerald-500 hover:from-[#00d4b8] hover:to-emerald-400 text-white transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(0,191,165,0.2)] hover:shadow-[0_4px_16px_rgba(0,191,165,0.3)] active:scale-95"
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         </div>
