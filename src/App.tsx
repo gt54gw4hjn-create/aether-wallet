@@ -640,17 +640,19 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = '';
 
     playHaptic('click');
+    setIsScanning(true);
 
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
-      setRawImageToCrop(dataUrl);
       
-      // Auto edge detection (CamScanner style crop)
       const img = new Image();
       img.src = dataUrl;
       img.onload = () => {
+        let pctTop = 5, pctBottom = 5, pctLeft = 5, pctRight = 5;
+        
+        // 1. Offscreen Canvas for Edge Detection
         const detectCanvas = document.createElement('canvas');
         const dCtx = detectCanvas.getContext('2d');
         if (dCtx) {
@@ -681,7 +683,6 @@ export default function App() {
             colBrightness[i] /= size;
           }
           
-          // Detect brightness deviation from borders
           const threshold = 18;
           let topIdx = 0;
           const topBorderAvg = (rowBrightness[0] + rowBrightness[1] + rowBrightness[2] + rowBrightness[3] + rowBrightness[4]) / 5;
@@ -721,23 +722,76 @@ export default function App() {
             }
           }
           
-          const pctTop = Math.min(40, Math.max(3, Math.round((topIdx / size) * 100)));
-          const pctBottom = Math.min(40, Math.max(3, Math.round((bottomIdx / size) * 100)));
-          const pctLeft = Math.min(40, Math.max(3, Math.round((leftIdx / size) * 100)));
-          const pctRight = Math.min(40, Math.max(3, Math.round((rightIdx / size) * 100)));
-          
-          setCropTop(pctTop);
-          setCropBottom(pctBottom);
-          setCropLeft(pctLeft);
-          setCropRight(pctRight);
+          pctTop = Math.min(40, Math.max(3, Math.round((topIdx / size) * 100)));
+          pctBottom = Math.min(40, Math.max(3, Math.round((bottomIdx / size) * 100)));
+          pctLeft = Math.min(40, Math.max(3, Math.round((leftIdx / size) * 100)));
+          pctRight = Math.min(40, Math.max(3, Math.round((rightIdx / size) * 100)));
+        }
+
+        // 2. Offscreen Canvas for Crop & CamScanner Filter
+        const x = img.width * (pctLeft / 100);
+        const y = img.height * (pctTop / 100);
+        const w = img.width * (1 - (pctLeft + pctRight) / 100);
+        const h = img.height * (1 - (pctTop + pctBottom) / 100);
+        
+        const MAX_SAVE_DIM = 1024;
+        let targetW = w;
+        let targetH = h;
+        if (targetW > targetH) {
+          if (targetW > MAX_SAVE_DIM) {
+            targetH = targetH * (MAX_SAVE_DIM / targetW);
+            targetW = MAX_SAVE_DIM;
+          }
         } else {
-          setCropTop(5);
-          setCropBottom(5);
-          setCropLeft(5);
-          setCropRight(5);
+          if (targetH > MAX_SAVE_DIM) {
+            targetW = targetW * (MAX_SAVE_DIM / targetH);
+            targetH = MAX_SAVE_DIM;
+          }
+        }
+
+        const cropCanvas = document.createElement('canvas');
+        cropCanvas.width = targetW;
+        cropCanvas.height = targetH;
+        const cCtx = cropCanvas.getContext('2d');
+        if (cCtx) {
+          cCtx.drawImage(img, x, y, w, h, 0, 0, targetW, targetH);
+          
+          // Apply CamScanner filter (Grayscale + High Contrast + Brighten)
+          const imgData = cCtx.getImageData(0, 0, targetW, targetH);
+          if (imgData) {
+            const pixels = imgData.data;
+            for (let i = 0; i < pixels.length; i += 4) {
+              const r = pixels[i];
+              const g = pixels[i + 1];
+              const b = pixels[i + 2];
+              const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+              
+              const contrast = 1.7;
+              const brightness = 12;
+              let newVal = contrast * (gray - 128) + 128 + brightness;
+              newVal = Math.max(0, Math.min(255, newVal));
+              
+              pixels[i] = newVal;
+              pixels[i + 1] = newVal;
+              pixels[i + 2] = newVal;
+            }
+            cCtx.putImageData(imgData, 0, 0);
+          }
+          
+          const croppedUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
+          
+          // Trigger the AI scanning pipeline directly
+          processAndScanImage(croppedUrl);
+        } else {
+          setIsScanning(false);
+          alert("Failed to process the receipt image canvas.");
         }
       };
-      setIsCropEditorOpen(true);
+      
+      img.onerror = () => {
+        setIsScanning(false);
+        alert("Failed to load the captured photo.");
+      };
     };
   };
 
