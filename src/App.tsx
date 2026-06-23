@@ -474,10 +474,7 @@ export default function App() {
 
   // V4 Custom States for Receipts and Swiping
   const [scannedImage, setScannedImage] = useState<string | null>(null);
-  const [rawCroppedImage, setRawCroppedImage] = useState<string | null>(null);
   const [lightboxReceipt, setLightboxReceipt] = useState<{ url: string; title: string; id: string } | null>(null);
-  const [lightboxRawUrl, setLightboxRawUrl] = useState<string | null>(null);
-  const [lightboxActiveFilter, setLightboxActiveFilter] = useState<'original' | 'magic' | 'bw' | 'grayscale'>('magic');
   const [swipeActiveId, setSwipeActiveId] = useState<string | null>(null);
   const [swipeDistance, setSwipeDistance] = useState<number>(0);
   const touchStartX = useRef<number>(0);
@@ -843,7 +840,6 @@ If the document corners are not clear, return a safe estimation covering the mai
       };
 
       const croppedUrl = warpPerspective(img, corners, img.width, img.height);
-      setRawCroppedImage(croppedUrl);
 
       // 3. Apply default contrast filter (Magic Color)
       setScanStatus("Enhancing scan contrast & details...");
@@ -991,9 +987,6 @@ If the document corners are not clear, return a safe estimation covering the mai
       
       if (scannedImage) {
         await saveReceipt(editingId, scannedImage);
-        if (rawCroppedImage) {
-          await saveReceipt(editingId + '_raw', rawCroppedImage);
-        }
       } else {
         await deleteReceipt(editingId);
         await deleteReceipt(editingId + '_raw');
@@ -1016,9 +1009,6 @@ If the document corners are not clear, return a safe estimation covering the mai
       updatedExpensesList = [newExpense, ...expenses];
       if (scannedImage) {
         await saveReceipt(newId, scannedImage);
-        if (rawCroppedImage) {
-          await saveReceipt(newId + '_raw', rawCroppedImage);
-        }
       }
     }
 
@@ -1661,161 +1651,10 @@ If the document corners are not clear, return a safe estimation covering the mai
   const handleViewReceipt = async (id: string, title: string) => {
     playHaptic('click');
     const img = await getReceipt(id);
-    const rawImg = await getReceipt(id + '_raw');
     if (img) {
       setLightboxReceipt({ url: img, title, id });
-      setLightboxRawUrl(rawImg || img);
-      setLightboxActiveFilter('magic');
     } else {
       alert("Receipt image not found.");
-    }
-  };
-
-  const handleApplyLightboxFilter = async (filterName: 'original' | 'magic' | 'bw' | 'grayscale') => {
-    if (!lightboxReceipt || !lightboxRawUrl) return;
-    playHaptic('success');
-    setLightboxActiveFilter(filterName);
-
-    if (filterName === 'original') {
-      setLightboxReceipt(prev => prev ? { ...prev, url: lightboxRawUrl } : null);
-      await saveReceipt(lightboxReceipt.id, lightboxRawUrl);
-      return;
-    }
-
-    const img = new Image();
-    img.src = lightboxRawUrl;
-    img.onload = async () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        const imgData = ctx.getImageData(0, 0, img.width, img.height);
-        const pixels = imgData.data;
-
-        if (filterName === 'magic') {
-          // Magic Color contrast filter
-          const contrast = 1.6;
-          const brightness = 15;
-          for (let i = 0; i < pixels.length; i += 4) {
-            let r = pixels[i];
-            let g = pixels[i+1];
-            let b = pixels[i+2];
-            r = contrast * (r - 128) + 128 + brightness;
-            g = contrast * (g - 128) + 128 + brightness;
-            b = contrast * (b - 128) + 128 + brightness;
-            pixels[i] = Math.max(0, Math.min(255, r));
-            pixels[i+1] = Math.max(0, Math.min(255, g));
-            pixels[i+2] = Math.max(0, Math.min(255, b));
-          }
-        } else if (filterName === 'bw') {
-          // Monochrome high-contrast filter
-          for (let i = 0; i < pixels.length; i += 4) {
-            const r = pixels[i];
-            const g = pixels[i+1];
-            const b = pixels[i+2];
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            
-            const contrast = 1.7;
-            const brightness = 12;
-            let val = contrast * (gray - 128) + 128 + brightness;
-            val = Math.max(0, Math.min(255, val));
-            
-            pixels[i] = val;
-            pixels[i+1] = val;
-            pixels[i+2] = val;
-          }
-        } else if (filterName === 'grayscale') {
-          // Smooth grayscale filter
-          for (let i = 0; i < pixels.length; i += 4) {
-            const r = pixels[i];
-            const g = pixels[i+1];
-            const b = pixels[i+2];
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            pixels[i] = gray;
-            pixels[i+1] = gray;
-            pixels[i+2] = gray;
-          }
-        }
-
-        ctx.putImageData(imgData, 0, 0);
-        const filteredUrl = canvas.toDataURL('image/jpeg', 0.85);
-        
-        // Update state and IndexedDB
-        setLightboxReceipt(prev => prev ? { ...prev, url: filteredUrl } : null);
-        await saveReceipt(lightboxReceipt.id, filteredUrl);
-      }
-    };
-  };
-
-  const handleExportPDF = () => {
-    if (!lightboxReceipt) return;
-    playHaptic('success');
-    try {
-      const jspdfLib = (window as unknown as {
-        jspdf: {
-          jsPDF: new (options?: {
-            orientation?: string;
-            unit?: string;
-            format?: string;
-          }) => {
-            internal: {
-              pageSize: {
-                getWidth: () => number;
-                getHeight: () => number;
-              };
-            };
-            addImage: (
-              src: string,
-              format: string,
-              x: number,
-              y: number,
-              w: number,
-              h: number
-            ) => void;
-            save: (filename: string) => void;
-          };
-        };
-      }).jspdf;
-      const pdf = new jspdfLib.jsPDF({
-        orientation: 'portrait',
-        unit: 'pt',
-        format: 'a4'
-      });
-
-      const img = new Image();
-      img.src = lightboxReceipt.url;
-      img.onload = () => {
-        const pageWidth = pdf.internal.pageSize.getWidth();
-        const pageHeight = pdf.internal.pageSize.getHeight();
-        
-        const margin = 40;
-        const maxW = pageWidth - margin * 2;
-        const maxH = pageHeight - margin * 2;
-        
-        let width = img.width;
-        let height = img.height;
-        const ratio = width / height;
-        
-        if (width > maxW) {
-          width = maxW;
-          height = width / ratio;
-        }
-        if (height > maxH) {
-          height = maxH;
-          width = height * ratio;
-        }
-        
-        const x = (pageWidth - width) / 2;
-        const y = (pageHeight - height) / 2;
-        
-        pdf.addImage(lightboxReceipt.url, 'JPEG', x, y, width, height);
-        pdf.save(`scanned_document_${lightboxReceipt.id}.pdf`);
-      };
-    } catch (err) {
-      console.error("Failed to export PDF:", err);
-      alert("Failed to export PDF document.");
     }
   };
 
@@ -2809,7 +2648,7 @@ If the document corners are not clear, return a safe estimation covering the mai
         </div>
       </div>
 
-      {/* Receipt Lightbox Modal - CamScanner Workspace */}
+      {/* Receipt Lightbox Modal */}
       {lightboxReceipt && (
         <div 
           className="fixed inset-0 z-50 bg-[#070913]/90 backdrop-blur-xl flex flex-col items-center justify-center p-4 md:p-6 animate-in fade-in duration-300"
@@ -2822,16 +2661,9 @@ If the document corners are not clear, return a safe estimation covering the mai
             {/* Header bar */}
             <div className="w-full flex items-center justify-between p-5 border-b border-white/5 bg-slate-950/40">
               <div className="flex flex-col text-left">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold text-[#00bfa5] tracking-wider uppercase bg-[#00bfa5]/10 px-2 py-0.5 rounded-full border border-[#00bfa5]/20">
-                    CamScanner Mode
-                  </span>
-                  {lightboxActiveFilter !== 'original' && (
-                    <span className="text-[10px] font-bold text-indigo-400 tracking-wider uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
-                      Enhanced
-                    </span>
-                  )}
-                </div>
+                <span className="text-[10px] font-bold text-indigo-400 tracking-wider uppercase bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20 w-fit">
+                  Receipt Scan
+                </span>
                 <h3 className="text-sm font-extrabold text-white truncate max-w-[220px] mt-1.5">{lightboxReceipt.title}</h3>
               </div>
               <button 
@@ -2844,53 +2676,11 @@ If the document corners are not clear, return a safe estimation covering the mai
             
             {/* Image Preview Area */}
             <div className="relative w-full p-6 flex items-center justify-center bg-slate-950/60 min-h-[35vh] max-h-[45vh] overflow-hidden border-b border-white/5">
-              {/* Corner decos to make it look like a real document crop area */}
-              <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-[#00bfa5]/80 rounded-tl-sm"></div>
-              <div className="absolute top-4 right-4 w-4 h-4 border-t-2 border-r-2 border-[#00bfa5]/80 rounded-tr-sm"></div>
-              <div className="absolute bottom-4 left-4 w-4 h-4 border-b-2 border-l-2 border-[#00bfa5]/80 rounded-bl-sm"></div>
-              <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-[#00bfa5]/80 rounded-br-sm"></div>
-              
               <img 
                 src={lightboxReceipt.url} 
                 alt="Receipt Scan" 
                 className="max-w-full max-h-[38vh] object-contain rounded-xl shadow-2xl select-none transition-all duration-300 border border-white/5"
               />
-            </div>
-
-            {/* Filter Selection Panel */}
-            <div className="w-full p-5 bg-slate-950/20 flex flex-col gap-3">
-              <span className="text-[11px] font-bold text-slate-400 tracking-wider uppercase px-1">Filter Preset</span>
-              <div className="grid grid-cols-4 gap-2 w-full">
-                {([
-                  { id: 'original', name: 'Original', icon: 'image', desc: 'Raw Photo' },
-                  { id: 'magic', name: 'Magic', icon: 'auto_fix_high', desc: 'Contrast' },
-                  { id: 'bw', name: 'B&W', icon: 'contrast', desc: 'Monochrome' },
-                  { id: 'grayscale', name: 'Grayscale', icon: 'gradient', desc: 'Smooth' }
-                ] as const).map((f) => {
-                  const isActive = lightboxActiveFilter === f.id;
-                  return (
-                    <button
-                      key={f.id}
-                      onClick={() => handleApplyLightboxFilter(f.id)}
-                      className={`flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border transition-all duration-300 cursor-pointer select-none bg-slate-900/60
-                        ${isActive 
-                          ? 'border-[#00bfa5] bg-gradient-to-b from-[#00bfa5]/10 to-[#00bfa5]/0 text-white shadow-[0_0_12px_rgba(0,191,165,0.15)] hover:bg-[#00bfa5]/15' 
-                          : 'border-white/5 text-slate-400 hover:text-slate-200 hover:border-white/10 hover:bg-slate-900'}`}
-                    >
-                      <div 
-                        className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-300
-                          ${isActive ? 'bg-[#00bfa5]/20 text-[#00bfa5]' : 'bg-white/5 text-slate-400'}`}
-                      >
-                        <span className="material-symbols-outlined text-[20px]">{f.icon}</span>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-[10px] font-bold tracking-tight leading-none">{f.name}</p>
-                        <p className="text-[8px] text-slate-500 font-medium leading-none mt-0.5">{f.desc}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
             </div>
 
             {/* Bottom Actions Bar */}
@@ -2912,17 +2702,19 @@ If the document corners are not clear, return a safe estimation covering the mai
               </button>
               
               <div className="flex items-center gap-2.5 flex-1 justify-end">
-                <button 
-                  onClick={handleExportPDF}
-                  className="flex items-center gap-1.5 px-4 h-11 rounded-2xl text-xs font-bold bg-slate-800 hover:bg-slate-750 text-white transition-all duration-200 cursor-pointer border border-white/5 hover:border-white/10 active:scale-95"
+                <a 
+                  href={lightboxReceipt.url} 
+                  download={`receipt_${lightboxReceipt.id}.jpg`}
+                  onClick={() => playHaptic('success')}
+                  className="flex items-center gap-1.5 px-4 h-11 rounded-2xl text-xs font-bold bg-slate-800 hover:bg-slate-750 text-white transition-all duration-200 cursor-pointer border border-white/5 hover:border-white/10 active:scale-95 no-underline"
                 >
-                  <span className="material-symbols-outlined text-[16px]">picture_as_pdf</span>
-                  Export PDF
-                </button>
+                  <span className="material-symbols-outlined text-[16px]">download</span>
+                  Download JPEG
+                </a>
                 
                 <button 
                   onClick={() => { playHaptic('success'); setLightboxReceipt(null); }}
-                  className="flex items-center gap-1.5 px-5 h-11 rounded-2xl text-xs font-bold bg-gradient-to-r from-[#00bfa5] to-emerald-500 hover:from-[#00d4b8] hover:to-emerald-400 text-white transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(0,191,165,0.2)] hover:shadow-[0_4px_16px_rgba(0,191,165,0.3)] active:scale-95"
+                  className="flex items-center gap-1.5 px-5 h-11 rounded-2xl text-xs font-bold bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white transition-all duration-200 cursor-pointer border-0 shadow-[0_4px_12px_rgba(79,70,229,0.2)] hover:shadow-[0_4px_16px_rgba(79,70,229,0.3)] active:scale-95"
                 >
                   Done
                 </button>
