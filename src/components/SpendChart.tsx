@@ -25,6 +25,26 @@ const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode, category
   const maxTotal = Math.max(...catTotals.map((c) => c.total), 1);
   const sorted = [...catTotals].sort((a, b) => b.total - a.total);
 
+  const renderFormattedAmount = (amount: number) => {
+    const parts = amount.toFixed(2).split('.');
+    const intPart = parts[0];
+    const decPart = parts[1];
+
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'baseline' }}>
+        <span style={{ fontSize: '0.78em', opacity: 0.6, fontWeight: 600, marginRight: '1px', verticalAlign: 'baseline' }}>
+          {currencySymbol}
+        </span>
+        <span style={{ fontWeight: 800 }}>
+          {Number(intPart).toLocaleString('en-US')}
+        </span>
+        <span style={{ fontSize: '0.78em', opacity: 0.6, fontWeight: 700, verticalAlign: 'baseline' }}>
+          .{decPart}
+        </span>
+      </span>
+    );
+  };
+
   return (
     <div
       style={{
@@ -73,10 +93,10 @@ const SpendChart: React.FC<SpendChartProps> = ({ catTotals, isDarkMode, category
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
                   <span style={{ fontSize: '0.72rem', fontWeight: 600, color: valueColor }}>{cat.label}</span>
                   <span style={{ fontSize: '0.72rem', fontWeight: 700, color: barColor }}>
-                    {currencySymbol}{cat.total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {renderFormattedAmount(cat.total)}
                     {hasLimit && (
-                      <span style={{ fontWeight: 500, fontSize: '0.65rem', opacity: 0.6, marginLeft: '3px' }}>
-                        / {currencySymbol}{limit.toLocaleString('en-US')}
+                      <span style={{ fontWeight: 500, fontSize: '0.65rem', opacity: 0.6, marginLeft: '4px' }}>
+                        / <span style={{ fontSize: '0.85em', marginRight: '1px' }}>{currencySymbol}</span>{limit.toLocaleString('en-US')}
                       </span>
                     )}
                   </span>

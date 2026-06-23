@@ -52,6 +52,62 @@ const formatTime12h = (time24?: string) => {
   return `${hours}:${minutesStr} ${ampm}`;
 };
 
+// Helper to render currency with optimized typography (smaller currency symbol and smaller cents)
+const renderFormattedAmount = (amount: number, code: string = 'MYR', isNegative: boolean = false) => {
+  const safeAmount = typeof amount === 'number' && !isNaN(amount) ? amount : parseFloat(String(amount)) || 0;
+  const match = CURRENCIES.find(c => c.code === code);
+  const symbol = match ? match.symbol : 'RM';
+  const parts = safeAmount.toFixed(2).split('.');
+  const intPart = parts[0];
+  const decPart = parts[1];
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline' }}>
+      {isNegative && <span style={{ marginRight: '1px' }}>-</span>}
+      <span style={{ fontSize: '0.78em', opacity: 0.6, fontWeight: 600, marginRight: '2px', verticalAlign: 'baseline' }}>
+        {symbol}
+      </span>
+      <span style={{ fontWeight: 800 }}>
+        {Number(intPart).toLocaleString('en-US')}
+      </span>
+      <span style={{ fontSize: '0.78em', opacity: 0.6, fontWeight: 700, verticalAlign: 'baseline' }}>
+        .{decPart}
+      </span>
+    </span>
+  );
+};
+
+// Helper to format stored date into human-readable text (Today, Yesterday, or Month Day)
+const formatExpenseDate = (dateStr: string) => {
+  if (!dateStr) return '';
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  const tStr = today.toISOString().split('T')[0];
+  const yStr = yesterday.toISOString().split('T')[0];
+
+  if (dateStr === tStr) return 'Today';
+  if (dateStr === yStr) return 'Yesterday';
+
+  // Fallback to parsing
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    const year = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1;
+    const day = parseInt(parts[2], 10);
+    const d = new Date(year, month, day);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+  }
+  
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+
 // Robustly parse a stored expense date (handles both ISO "2026-06-22" and legacy "6/22/2026" / "22/6/2026")
 const parseExpenseDate = (dateStr: string): Date => {
   if (!dateStr) return new Date(NaN);
@@ -956,17 +1012,30 @@ export default function App() {
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>{category.label}</span>
+              <div className="flex items-center gap-1.5 mt-0.5 text-[11px] font-medium transition-colors">
+                <span className={isDarkMode ? 'text-slate-400' : 'text-slate-500'}>
+                  {formatExpenseDate(exp.date)}
+                </span>
                 {exp.time && (
                   <>
-                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>â€¢</span>
-                    <span className={`text-[11px] font-medium ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{formatTime12h(exp.time)}</span>
+                    <span className={isDarkMode ? 'text-slate-700' : 'text-slate-300'}>•</span>
+                    <span className={isDarkMode ? 'text-slate-500' : 'text-slate-400'}>
+                      {formatTime12h(exp.time)}
+                    </span>
+                  </>
+                )}
+                {/* Only display category label if the expense title is different, to avoid repetition */}
+                {exp.title !== category.label && (
+                  <>
+                    <span className={isDarkMode ? 'text-slate-700' : 'text-slate-300'}>•</span>
+                    <span className={isDarkMode ? 'text-slate-500' : 'text-slate-400'}>
+                      {category.label}
+                    </span>
                   </>
                 )}
                 {exp.scopeType && exp.scopeType !== 'one-off' && (
                   <>
-                    <span className={`text-[9px] ${isDarkMode ? 'text-slate-700' : 'text-slate-300'}`}>â€¢</span>
+                    <span className={isDarkMode ? 'text-slate-700' : 'text-slate-300'}>•</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold transition-colors
                                      ${exp.scopeType === 'weekly' 
                                        ? (isDarkMode ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-amber-50 text-amber-700 border border-amber-200') 
@@ -986,7 +1055,10 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className={`text-base font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>-{formatCurrency(exp.amount, currency)}</span>
+            <span className={`text-base font-bold ${isDarkMode ? 'text-slate-100' : 'text-slate-800'}`}>
+              {renderFormattedAmount(exp.amount, currency, true)}
+            </span>
+
             {!isBulkMode && (
               <button 
                 onClick={(e) => handleDeleteExpense(exp.id, e)}
@@ -1504,7 +1576,7 @@ export default function App() {
                       <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Weekly</span>
                     </div>
                     <div className="mt-2">
-                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(weeklyTotal, currency)}</span>
+                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{renderFormattedAmount(weeklyTotal, currency, false)}</span>
                       <p className={`text-[10px] m-0 mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{weeklyItems.length} recurring items</p>
                     </div>
                   </div>
@@ -1516,7 +1588,7 @@ export default function App() {
                       <span className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>Monthly</span>
                     </div>
                     <div className="mt-2">
-                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{formatCurrency(monthlyTotal, currency)}</span>
+                      <span className={`text-2xl font-extrabold tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{renderFormattedAmount(monthlyTotal, currency, false)}</span>
                       <p className={`text-[10px] m-0 mt-0.5 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>{monthlyItems.length} recurring items</p>
                     </div>
                   </div>
@@ -1813,12 +1885,19 @@ export default function App() {
                                   <span className={`text-[15px] font-semibold transition-colors group-hover:text-blue-500 ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{proj.name}</span>
                                   <span className={`text-[10px] ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
                                     {projExpenses.length} expenses
-                                    {typeof proj.budget === 'number' && proj.budget > 0 && ` â€¢ Budget ${getCurrencySymbol(currency)}${proj.budget}`}
+                                    {typeof proj.budget === 'number' && proj.budget > 0 && (
+                                      <>
+                                        {' • Budget '}
+                                        {renderFormattedAmount(proj.budget, currency, false)}
+                                      </>
+                                    )}
                                   </span>
                                 </div>
                               </div>
                               <div className="flex items-center gap-3">
-                                <span className={`text-base font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{formatCurrency(projTotal, currency)}</span>
+                                <span className={`text-base font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>
+                                  {renderFormattedAmount(projTotal, currency, false)}
+                                </span>
                                 <span className={`material-symbols-outlined text-slate-400 transition-transform group-hover:translate-x-0.5`}>chevron_right</span>
                               </div>
                             </div>

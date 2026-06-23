@@ -14,18 +14,41 @@ const InsightStrip: React.FC<InsightStripProps> = ({ dailyAvg, peakDay, thisMont
   const labelColor = isDarkMode ? '#64748b' : '#94a3b8';
   const valueColor = isDarkMode ? '#f1f5f9' : '#0f172a';
 
+  const renderFormattedValue = (value: string | number, label: string) => {
+    if (label === 'Peak Day' || typeof value !== 'number') {
+      return <span>{value}</span>;
+    }
+    const parts = value.toFixed(2).split('.');
+    const intPart = parts[0];
+    const decPart = parts[1];
+
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'baseline' }}>
+        <span style={{ fontSize: '0.78em', opacity: 0.6, fontWeight: 600, marginRight: '1px', verticalAlign: 'baseline' }}>
+          {currencySymbol}
+        </span>
+        <span style={{ fontWeight: 800 }}>
+          {Number(intPart).toLocaleString('en-US')}
+        </span>
+        <span style={{ fontSize: '0.78em', opacity: 0.6, fontWeight: 700, verticalAlign: 'baseline' }}>
+          .{decPart}
+        </span>
+      </span>
+    );
+  };
+
   const tiles = [
     {
       icon: 'today',
       iconColor: '#6366f1',
       label: 'Daily Avg',
-      value: `${currencySymbol}${dailyAvg.toFixed(2)}`,
+      value: dailyAvg,
     },
     {
       icon: 'trending_up',
       iconColor: '#10b981',
       label: 'This Month',
-      value: `${currencySymbol}${thisMonthTotal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      value: thisMonthTotal,
     },
     {
       icon: 'event',
@@ -59,7 +82,7 @@ const InsightStrip: React.FC<InsightStripProps> = ({ dailyAvg, peakDay, thisMont
             </span>
           </div>
           <span style={{ fontSize: '0.82rem', fontWeight: 800, color: valueColor, lineHeight: 1.2 }}>
-            {t.value}
+            {renderFormattedValue(t.value, t.label)}
           </span>
         </div>
       ))}
