@@ -507,7 +507,7 @@ export default function App() {
       // 1. Keep the color cropped image for the user to review and save in IndexedDB
       setScannedImage(croppedUrl);
 
-      // 2. Generate a processed grayscale/high-contrast image strictly for OpenAI Vision API (to optimize token usage and accuracy)
+      // 2. Downscale image strictly for OpenAI Vision API (to optimize token usage and cost)
       const processedDataUrl = await new Promise<string>((resolve, reject) => {
         const img = new Image();
         img.src = croppedUrl;
@@ -540,29 +540,7 @@ export default function App() {
 
           ctx.drawImage(img, 0, 0, width, height);
 
-          // Local grayscale & contrast enhancement for better AI read
-          const imgData = ctx.getImageData(0, 0, width, height);
-          const data = imgData.data;
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-            
-            let val: number;
-            if (gray < 120) {
-              val = Math.max(0, gray - 25);
-            } else {
-              val = Math.min(255, gray + 25);
-            }
-            
-            data[i] = val;
-            data[i + 1] = val;
-            data[i + 2] = val;
-          }
-          ctx.putImageData(imgData, 0, 0);
-
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
           resolve(dataUrl);
         };
         img.onerror = (err) => reject(err);
@@ -650,141 +628,150 @@ export default function App() {
       const img = new Image();
       img.src = dataUrl;
       img.onload = () => {
-        let pctTop = 5, pctBottom = 5, pctLeft = 5, pctRight = 5;
-        
-        // 1. Offscreen Canvas for Edge Detection
-        const detectCanvas = document.createElement('canvas');
-        const dCtx = detectCanvas.getContext('2d');
-        if (dCtx) {
-          const size = 150;
-          detectCanvas.width = size;
-          detectCanvas.height = size;
-          dCtx.drawImage(img, 0, 0, size, size);
+        try {
+          let pctTop = 5, pctBottom = 5, pctLeft = 5, pctRight = 5;
           
-          const imgData = dCtx.getImageData(0, 0, size, size);
-          const pixels = imgData.data;
-          
-          const getPixel = (x: number, y: number) => {
-            const idx = (y * size + x) * 4;
-            return 0.299 * pixels[idx] + 0.587 * pixels[idx+1] + 0.114 * pixels[idx+2];
-          };
-          
-          const rowBrightness = Array(size).fill(0);
-          const colBrightness = Array(size).fill(0);
-          for (let y = 0; y < size; y++) {
-            for (let x = 0; x < size; x++) {
-              const b = getPixel(x, y);
-              rowBrightness[y] += b;
-              colBrightness[x] += b;
-            }
-          }
-          for (let i = 0; i < size; i++) {
-            rowBrightness[i] /= size;
-            colBrightness[i] /= size;
-          }
-          
-          const threshold = 18;
-          let topIdx = 0;
-          const topBorderAvg = (rowBrightness[0] + rowBrightness[1] + rowBrightness[2] + rowBrightness[3] + rowBrightness[4]) / 5;
-          for (let y = 5; y < size / 2; y++) {
-            if (Math.abs(rowBrightness[y] - topBorderAvg) > threshold) {
-              topIdx = y;
-              break;
-            }
-          }
-          
-          let bottomIdx = 0;
-          const bottomBorderAvg = (rowBrightness[size-1] + rowBrightness[size-2] + rowBrightness[size-3] + rowBrightness[size-4] + rowBrightness[size-5]) / 5;
-          for (let y = 5; y < size / 2; y++) {
-            const currentY = size - 1 - y;
-            if (Math.abs(rowBrightness[currentY] - bottomBorderAvg) > threshold) {
-              bottomIdx = y;
-              break;
-            }
-          }
-          
-          let leftIdx = 0;
-          const leftBorderAvg = (colBrightness[0] + colBrightness[1] + colBrightness[2] + colBrightness[3] + colBrightness[4]) / 5;
-          for (let x = 5; x < size / 2; x++) {
-            if (Math.abs(colBrightness[x] - leftBorderAvg) > threshold) {
-              leftIdx = x;
-              break;
-            }
-          }
-          
-          let rightIdx = 0;
-          const rightBorderAvg = (colBrightness[size-1] + colBrightness[size-2] + colBrightness[size-3] + colBrightness[size-4] + colBrightness[size-5]) / 5;
-          for (let x = 5; x < size / 2; x++) {
-            const currentX = size - 1 - x;
-            if (Math.abs(colBrightness[currentX] - rightBorderAvg) > threshold) {
-              rightIdx = x;
-              break;
-            }
-          }
-          
-          pctTop = Math.min(40, Math.max(3, Math.round((topIdx / size) * 100)));
-          pctBottom = Math.min(40, Math.max(3, Math.round((bottomIdx / size) * 100)));
-          pctLeft = Math.min(40, Math.max(3, Math.round((leftIdx / size) * 100)));
-          pctRight = Math.min(40, Math.max(3, Math.round((rightIdx / size) * 100)));
-        }
-
-        // 2. Offscreen Canvas for Crop & CamScanner Filter
-        const x = img.width * (pctLeft / 100);
-        const y = img.height * (pctTop / 100);
-        const w = img.width * (1 - (pctLeft + pctRight) / 100);
-        const h = img.height * (1 - (pctTop + pctBottom) / 100);
-        
-        const MAX_SAVE_DIM = 1024;
-        let targetW = w;
-        let targetH = h;
-        if (targetW > targetH) {
-          if (targetW > MAX_SAVE_DIM) {
-            targetH = targetH * (MAX_SAVE_DIM / targetW);
-            targetW = MAX_SAVE_DIM;
-          }
-        } else {
-          if (targetH > MAX_SAVE_DIM) {
-            targetW = targetW * (MAX_SAVE_DIM / targetH);
-            targetH = MAX_SAVE_DIM;
-          }
-        }
-
-        const cropCanvas = document.createElement('canvas');
-        cropCanvas.width = targetW;
-        cropCanvas.height = targetH;
-        const cCtx = cropCanvas.getContext('2d');
-        if (cCtx) {
-          cCtx.drawImage(img, x, y, w, h, 0, 0, targetW, targetH);
-          
-          // Apply CamScanner filter (Grayscale + High Contrast + Brighten)
-          const imgData = cCtx.getImageData(0, 0, targetW, targetH);
-          if (imgData) {
+          // 1. Offscreen Canvas for Edge Detection
+          const detectCanvas = document.createElement('canvas');
+          const dCtx = detectCanvas.getContext('2d');
+          if (dCtx) {
+            const size = 150;
+            detectCanvas.width = size;
+            detectCanvas.height = size;
+            dCtx.drawImage(img, 0, 0, size, size);
+            
+            const imgData = dCtx.getImageData(0, 0, size, size);
             const pixels = imgData.data;
-            for (let i = 0; i < pixels.length; i += 4) {
-              const r = pixels[i];
-              const g = pixels[i + 1];
-              const b = pixels[i + 2];
-              const gray = 0.299 * r + 0.587 * g + 0.114 * b;
-              
-              const contrast = 1.7;
-              const brightness = 12;
-              let newVal = contrast * (gray - 128) + 128 + brightness;
-              newVal = Math.max(0, Math.min(255, newVal));
-              
-              pixels[i] = newVal;
-              pixels[i + 1] = newVal;
-              pixels[i + 2] = newVal;
+            
+            const getPixel = (x: number, y: number) => {
+              const idx = (y * size + x) * 4;
+              return 0.299 * pixels[idx] + 0.587 * pixels[idx+1] + 0.114 * pixels[idx+2];
+            };
+            
+            const rowBrightness = Array(size).fill(0);
+            const colBrightness = Array(size).fill(0);
+            for (let y = 0; y < size; y++) {
+              for (let x = 0; x < size; x++) {
+                const b = getPixel(x, y);
+                rowBrightness[y] += b;
+                colBrightness[x] += b;
+              }
             }
-            cCtx.putImageData(imgData, 0, 0);
+            for (let i = 0; i < size; i++) {
+              rowBrightness[i] /= size;
+              colBrightness[i] /= size;
+            }
+            
+            const threshold = 18;
+            let topIdx = 0;
+            const topBorderAvg = (rowBrightness[0] + rowBrightness[1] + rowBrightness[2] + rowBrightness[3] + rowBrightness[4]) / 5;
+            for (let y = 5; y < size / 2; y++) {
+              if (Math.abs(rowBrightness[y] - topBorderAvg) > threshold) {
+                topIdx = y;
+                break;
+              }
+            }
+            
+            let bottomIdx = 0;
+            const bottomBorderAvg = (rowBrightness[size-1] + rowBrightness[size-2] + rowBrightness[size-3] + rowBrightness[size-4] + rowBrightness[size-5]) / 5;
+            for (let y = 5; y < size / 2; y++) {
+              const currentY = size - 1 - y;
+              if (Math.abs(rowBrightness[currentY] - bottomBorderAvg) > threshold) {
+                bottomIdx = y;
+                break;
+              }
+            }
+            
+            let leftIdx = 0;
+            const leftBorderAvg = (colBrightness[0] + colBrightness[1] + colBrightness[2] + colBrightness[3] + colBrightness[4]) / 5;
+            for (let x = 5; x < size / 2; x++) {
+              if (Math.abs(colBrightness[x] - leftBorderAvg) > threshold) {
+                leftIdx = x;
+                break;
+              }
+            }
+            
+            let rightIdx = 0;
+            const rightBorderAvg = (colBrightness[size-1] + colBrightness[size-2] + colBrightness[size-3] + colBrightness[size-4] + colBrightness[size-5]) / 5;
+            for (let x = 5; x < size / 2; x++) {
+              const currentX = size - 1 - x;
+              if (Math.abs(colBrightness[currentX] - rightBorderAvg) > threshold) {
+                rightIdx = x;
+                break;
+              }
+            }
+            
+            pctTop = Math.min(40, Math.max(3, Math.round((topIdx / size) * 100)));
+            pctBottom = Math.min(40, Math.max(3, Math.round((bottomIdx / size) * 100)));
+            pctLeft = Math.min(40, Math.max(3, Math.round((leftIdx / size) * 100)));
+            pctRight = Math.min(40, Math.max(3, Math.round((rightIdx / size) * 100)));
           }
+
+          // 2. Offscreen Canvas for Crop & CamScanner Filter
+          let cropX = img.width * (pctLeft / 100);
+          let cropY = img.height * (pctTop / 100);
+          let cropW = img.width * (1 - (pctLeft + pctRight) / 100);
+          let cropH = img.height * (1 - (pctTop + pctBottom) / 100);
           
-          const croppedUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
-          
-          // Trigger the AI scanning pipeline directly
-          processAndScanImage(croppedUrl);
-        } else {
-          setIsScanning(false);
-          alert("Failed to process the receipt image canvas.");
+          if (isNaN(cropW) || cropW <= 10 || isNaN(cropH) || cropH <= 10 || isNaN(cropX) || isNaN(cropY)) {
+            cropX = img.width * 0.03;
+            cropY = img.height * 0.03;
+            cropW = img.width * 0.94;
+            cropH = img.height * 0.94;
+          }
+
+          const MAX_SAVE_DIM = 1024;
+          let targetW = cropW;
+          let targetH = cropH;
+          if (targetW > targetH) {
+            if (targetW > MAX_SAVE_DIM) {
+              targetH = targetH * (MAX_SAVE_DIM / targetW);
+              targetW = MAX_SAVE_DIM;
+            }
+          } else {
+            if (targetH > MAX_SAVE_DIM) {
+              targetW = targetW * (MAX_SAVE_DIM / targetH);
+              targetH = MAX_SAVE_DIM;
+            }
+          }
+
+          const cropCanvas = document.createElement('canvas');
+          cropCanvas.width = targetW;
+          cropCanvas.height = targetH;
+          const cCtx = cropCanvas.getContext('2d');
+          if (cCtx) {
+            cCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, targetW, targetH);
+            
+            // Apply CamScanner filter (Grayscale + High Contrast + Brighten)
+            const imgData = cCtx.getImageData(0, 0, targetW, targetH);
+            if (imgData) {
+              const pixels = imgData.data;
+              for (let i = 0; i < pixels.length; i += 4) {
+                const r = pixels[i];
+                const g = pixels[i + 1];
+                const b = pixels[i + 2];
+                const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                
+                const contrast = 1.7;
+                const brightness = 12;
+                let newVal = contrast * (gray - 128) + 128 + brightness;
+                newVal = Math.max(0, Math.min(255, newVal));
+                
+                pixels[i] = newVal;
+                pixels[i + 1] = newVal;
+                pixels[i + 2] = newVal;
+              }
+              cCtx.putImageData(imgData, 0, 0);
+            }
+            
+            const croppedUrl = cropCanvas.toDataURL('image/jpeg', 0.85);
+            processAndScanImage(croppedUrl);
+          } else {
+            processAndScanImage(dataUrl);
+          }
+        } catch (err) {
+          console.error("Canvas edge detection processing failed, using raw fallback:", err);
+          processAndScanImage(dataUrl);
         }
       };
       
@@ -2169,23 +2156,57 @@ export default function App() {
           {/* Extracted Input Form */}
           <div className="relative">
             {isScanning && (
-              <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center rounded-[2rem] backdrop-blur-md ${isDarkMode ? 'bg-black/85 text-white' : 'bg-white/90 text-slate-800'}`}>
-                {scannedImage && (
-                  <div className="relative w-44 h-56 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-4 shadow-2xl flex items-center justify-center">
-                    <img src={scannedImage} alt="Scanning" className="w-full h-full object-cover opacity-60" />
-                    {/* Laser scanner line */}
-                    <div 
-                      className="absolute left-0 right-0 h-1 bg-green-500 shadow-[0_0_12px_#22c55e,0_0_20px_#22c55e]"
-                      style={{
-                        animation: 'scanLaser 2.2s linear infinite',
-                        top: 0
-                      }}
-                    />
+              <div className="fixed inset-0 z-[100] flex flex-col items-center justify-center p-4 bg-black/60 backdrop-blur-md animate-in fade-in">
+                <div className={`w-full max-w-sm p-6 rounded-[2.5rem] flex flex-col items-center border shadow-2xl relative overflow-hidden transition-all
+                                 ${isDarkMode ? 'bg-slate-900/90 border-slate-800 text-white' : 'bg-white/95 border-slate-200 text-slate-800'}`}>
+                  {/* Decorative backgrounds */}
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-green-500/5 rounded-full blur-2xl pointer-events-none" />
+                  
+                  {/* Scanner Preview */}
+                  {scannedImage && (
+                    <div className="relative w-48 h-64 bg-slate-950 border border-slate-700/80 rounded-2xl overflow-hidden mb-6 shadow-2xl flex items-center justify-center">
+                      <img src={scannedImage} alt="Scanning" className="w-full h-full object-contain opacity-75" />
+                      
+                      {/* Technical Scanner Corners */}
+                      <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-green-500" />
+                      <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-green-500" />
+                      <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-green-500" />
+                      <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-green-500" />
+
+                      {/* Laser scanner line */}
+                      <div 
+                        className="absolute left-0 right-0 h-0.5 bg-green-400 shadow-[0_0_12px_#22c55e,0_0_20px_#22c55e]"
+                        style={{
+                          animation: 'scanLaser 2.2s linear infinite',
+                          top: 0
+                        }}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Loading Spinner and Status */}
+                  <div className="flex flex-col items-center text-center">
+                    <div className="relative w-12 h-12 flex items-center justify-center mb-4">
+                      {/* Spinner Ring */}
+                      <div className="absolute inset-0 rounded-full border-4 border-slate-200 dark:border-slate-800" />
+                      <div className="absolute inset-0 rounded-full border-4 border-green-500 border-t-transparent animate-spin" />
+                      <span className="material-symbols-outlined text-green-500 text-[20px] font-bold">document_scanner</span>
+                    </div>
+
+                    <h3 className={`text-base font-extrabold tracking-tight mb-1 ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+                      CamScanner AI Processing
+                    </h3>
+                    <p className={`text-xs font-semibold ${isDarkMode ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Extracting merchant, total, and items...
+                    </p>
+                    
+                    {/* Visual status badge */}
+                    <div className="mt-4 flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-green-500/10 border border-green-500/20 text-green-500 uppercase tracking-wider">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-ping" />
+                      Optimizing Image Contrast
+                    </div>
                   </div>
-                )}
-                <span className="material-symbols-outlined text-3xl animate-bounce text-green-500 mb-1">document_scanner</span>
-                <p className="font-bold text-sm tracking-wide text-green-500 animate-pulse uppercase">CamScanner Processing...</p>
-                <p className="text-[10px] text-slate-400 mt-1">AI extracting details...</p>
+                </div>
               </div>
             )}
             <form onSubmit={(e) => { handleAddExpense(e); setIsBottomSheetOpen(false); }} className="flex flex-col gap-6">
