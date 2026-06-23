@@ -644,11 +644,99 @@ export default function App() {
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
-      setRawImageToCrop(event.target?.result as string);
-      setCropTop(5);
-      setCropBottom(5);
-      setCropLeft(5);
-      setCropRight(5);
+      const dataUrl = event.target?.result as string;
+      setRawImageToCrop(dataUrl);
+      
+      // Auto edge detection (CamScanner style crop)
+      const img = new Image();
+      img.src = dataUrl;
+      img.onload = () => {
+        const detectCanvas = document.createElement('canvas');
+        const dCtx = detectCanvas.getContext('2d');
+        if (dCtx) {
+          const size = 150;
+          detectCanvas.width = size;
+          detectCanvas.height = size;
+          dCtx.drawImage(img, 0, 0, size, size);
+          
+          const imgData = dCtx.getImageData(0, 0, size, size);
+          const pixels = imgData.data;
+          
+          const getPixel = (x: number, y: number) => {
+            const idx = (y * size + x) * 4;
+            return 0.299 * pixels[idx] + 0.587 * pixels[idx+1] + 0.114 * pixels[idx+2];
+          };
+          
+          const rowBrightness = Array(size).fill(0);
+          const colBrightness = Array(size).fill(0);
+          for (let y = 0; y < size; y++) {
+            for (let x = 0; x < size; x++) {
+              const b = getPixel(x, y);
+              rowBrightness[y] += b;
+              colBrightness[x] += b;
+            }
+          }
+          for (let i = 0; i < size; i++) {
+            rowBrightness[i] /= size;
+            colBrightness[i] /= size;
+          }
+          
+          // Detect brightness deviation from borders
+          const threshold = 18;
+          let topIdx = 0;
+          const topBorderAvg = (rowBrightness[0] + rowBrightness[1] + rowBrightness[2] + rowBrightness[3] + rowBrightness[4]) / 5;
+          for (let y = 5; y < size / 2; y++) {
+            if (Math.abs(rowBrightness[y] - topBorderAvg) > threshold) {
+              topIdx = y;
+              break;
+            }
+          }
+          
+          let bottomIdx = 0;
+          const bottomBorderAvg = (rowBrightness[size-1] + rowBrightness[size-2] + rowBrightness[size-3] + rowBrightness[size-4] + rowBrightness[size-5]) / 5;
+          for (let y = 5; y < size / 2; y++) {
+            const currentY = size - 1 - y;
+            if (Math.abs(rowBrightness[currentY] - bottomBorderAvg) > threshold) {
+              bottomIdx = y;
+              break;
+            }
+          }
+          
+          let leftIdx = 0;
+          const leftBorderAvg = (colBrightness[0] + colBrightness[1] + colBrightness[2] + colBrightness[3] + colBrightness[4]) / 5;
+          for (let x = 5; x < size / 2; x++) {
+            if (Math.abs(colBrightness[x] - leftBorderAvg) > threshold) {
+              leftIdx = x;
+              break;
+            }
+          }
+          
+          let rightIdx = 0;
+          const rightBorderAvg = (colBrightness[size-1] + colBrightness[size-2] + colBrightness[size-3] + colBrightness[size-4] + colBrightness[size-5]) / 5;
+          for (let x = 5; x < size / 2; x++) {
+            const currentX = size - 1 - x;
+            if (Math.abs(colBrightness[currentX] - rightBorderAvg) > threshold) {
+              rightIdx = x;
+              break;
+            }
+          }
+          
+          const pctTop = Math.min(40, Math.max(3, Math.round((topIdx / size) * 100)));
+          const pctBottom = Math.min(40, Math.max(3, Math.round((bottomIdx / size) * 100)));
+          const pctLeft = Math.min(40, Math.max(3, Math.round((leftIdx / size) * 100)));
+          const pctRight = Math.min(40, Math.max(3, Math.round((rightIdx / size) * 100)));
+          
+          setCropTop(pctTop);
+          setCropBottom(pctBottom);
+          setCropLeft(pctLeft);
+          setCropRight(pctRight);
+        } else {
+          setCropTop(5);
+          setCropBottom(5);
+          setCropLeft(5);
+          setCropRight(5);
+        }
+      };
       setIsCropEditorOpen(true);
     };
   };
@@ -2027,9 +2115,23 @@ export default function App() {
           {/* Extracted Input Form */}
           <div className="relative">
             {isScanning && (
-              <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center rounded-[2rem] backdrop-blur-md ${isDarkMode ? 'bg-black/60 text-white' : 'bg-white/70 text-slate-800'}`}>
-                <span className="material-symbols-outlined text-4xl animate-bounce text-indigo-500 mb-2">document_scanner</span>
-                <p className="font-medium animate-pulse">AI Scanning Receipt...</p>
+              <div className={`absolute inset-0 z-50 flex flex-col items-center justify-center rounded-[2rem] backdrop-blur-md ${isDarkMode ? 'bg-black/85 text-white' : 'bg-white/90 text-slate-800'}`}>
+                {scannedImage && (
+                  <div className="relative w-44 h-56 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-4 shadow-2xl flex items-center justify-center">
+                    <img src={scannedImage} alt="Scanning" className="w-full h-full object-cover opacity-60" />
+                    {/* Laser scanner line */}
+                    <div 
+                      className="absolute left-0 right-0 h-1 bg-green-500 shadow-[0_0_12px_#22c55e,0_0_20px_#22c55e]"
+                      style={{
+                        animation: 'scanLaser 2.2s linear infinite',
+                        top: 0
+                      }}
+                    />
+                  </div>
+                )}
+                <span className="material-symbols-outlined text-3xl animate-bounce text-green-500 mb-1">document_scanner</span>
+                <p className="font-bold text-sm tracking-wide text-green-500 animate-pulse uppercase">CamScanner Processing...</p>
+                <p className="text-[10px] text-slate-400 mt-1">AI extracting details...</p>
               </div>
             )}
             <form onSubmit={(e) => { handleAddExpense(e); setIsBottomSheetOpen(false); }} className="flex flex-col gap-6">
@@ -3061,7 +3163,31 @@ export default function App() {
                     const ctx = canvas.getContext('2d');
                     if (ctx) {
                       ctx.drawImage(img, x, y, w, h, 0, 0, targetW, targetH);
-                      const croppedUrl = canvas.toDataURL('image/jpeg', 0.8);
+                      
+                      // Apply CamScanner filter (Grayscale + High Contrast + Brighten)
+                      const imgData = ctx.getImageData(0, 0, targetW, targetH);
+                      if (imgData) {
+                        const data = imgData.data;
+                        for (let i = 0; i < data.length; i += 4) {
+                          const r = data[i];
+                          const g = data[i + 1];
+                          const b = data[i + 2];
+                          const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                          
+                          // Stretch contrast and boost brightness for a crisp black-and-white scan look
+                          const contrast = 1.7;
+                          const brightness = 12;
+                          let newVal = contrast * (gray - 128) + 128 + brightness;
+                          newVal = Math.max(0, Math.min(255, newVal));
+                          
+                          data[i] = newVal;
+                          data[i + 1] = newVal;
+                          data[i + 2] = newVal;
+                        }
+                        ctx.putImageData(imgData, 0, 0);
+                      }
+                      
+                      const croppedUrl = canvas.toDataURL('image/jpeg', 0.85);
                       processAndScanImage(croppedUrl);
                     }
                   };

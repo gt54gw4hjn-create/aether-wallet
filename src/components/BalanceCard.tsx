@@ -29,18 +29,24 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
     : 'rgba(255,255,255,0.85)';
 
   return (
-    <div style={{
-      background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #a855f7 100%)',
-      backgroundColor: '#6366f1',
-      borderRadius: '1.5rem',
-      padding: '1.5rem',
-      position: 'relative',
-      overflow: 'hidden',
-      boxShadow: '0 20px 60px rgba(79,70,229,0.38)',
-      flexShrink: 0,
-      minHeight: budgetLimit > 0 ? '210px' : '160px',
-      height: 'auto',
-    }}>
+    <div 
+      className={`balance-card ${isOverBudget ? 'budget-alert-pulse' : ''}`}
+      style={{
+        background: isOverBudget
+          ? 'linear-gradient(135deg, #ef4444 0%, #dc2626 55%, #b91c1c 100%)'
+          : 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 55%, #a855f7 100%)',
+        backgroundColor: isOverBudget ? '#ef4444' : '#6366f1',
+        borderRadius: '1.5rem',
+        padding: '1.5rem',
+        position: 'relative',
+        overflow: 'hidden',
+        boxShadow: isOverBudget ? undefined : '0 20px 60px rgba(79,70,229,0.38)',
+        flexShrink: 0,
+        minHeight: budgetLimit > 0 ? '210px' : '160px',
+        height: 'auto',
+        transition: 'all 0.5s ease',
+      }}
+    >
       {/* Decorative orbs */}
       <div style={{ position:'absolute', top:'-40px', right:'-40px', width:'140px', height:'140px', borderRadius:'50%', background:'rgba(255,255,255,0.10)', pointerEvents:'none' }} />
       <div style={{ position:'absolute', bottom:'-25px', left:'20px', width:'100px', height:'100px', borderRadius:'50%', background:'rgba(255,255,255,0.06)', pointerEvents:'none' }} />
