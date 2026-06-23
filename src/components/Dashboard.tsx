@@ -104,7 +104,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div
-      className="flex-1 w-full overflow-y-auto custom-scrollbar"
+      className="w-full"
       style={{
         padding: '1rem',
         display: 'flex',
