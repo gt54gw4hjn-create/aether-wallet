@@ -51,10 +51,10 @@ const BalanceCard: React.FC<BalanceCardProps> = ({
       </p>
 
       {/* Amount */}
-      <div style={{ display:'flex', alignItems:'flex-end', gap:'2px', marginBottom:'1rem' }}>
-        <span style={{ fontSize:'1.1rem', fontWeight:600, color:'rgba(255,255,255,0.75)', marginBottom:'6px', marginRight:'2px' }}>{currencySymbol}</span>
-        <span style={{ fontSize:'3rem', fontWeight:800, color:'#fff', letterSpacing:'-0.02em', lineHeight:'normal' }}>{intPart}</span>
-        <span style={{ fontSize:'1.4rem', fontWeight:700, color:'rgba(255,255,255,0.8)', marginBottom:'5px', lineHeight:'normal' }}>.{decPart}</span>
+      <div style={{ display:'flex', alignItems:'baseline', gap:'2px', marginBottom:'1rem' }}>
+        <span style={{ fontSize:'1.1rem', fontWeight:600, color:'rgba(255,255,255,0.75)', marginRight:'2px' }}>{currencySymbol}</span>
+        <span style={{ fontSize:'3rem', fontWeight:800, color:'#fff', letterSpacing:'-0.02em', lineHeight:'1' }}>{intPart}</span>
+        <span style={{ fontSize:'1.4rem', fontWeight:700, color:'rgba(255,255,255,0.8)', lineHeight:'1' }}>.{decPart}</span>
       </div>
 
       {/* Budget bar (only if budgetLimit set) */}

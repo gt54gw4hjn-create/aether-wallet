@@ -1961,7 +1961,7 @@ export default function App() {
                     Please Review AI Extraction
                   </span>
                 )}
-                <div className="flex items-baseline gap-2">
+                <div className="flex items-center justify-center gap-2 w-full">
                   <span className={`text-3xl font-bold ${isDarkMode ? 'text-slate-600' : 'text-slate-400'}`}>{getCurrencySymbol(currency)}</span>
                   <div 
                     className={`w-full max-w-[280px] text-center text-6xl font-bold bg-transparent border-none outline-none p-0 m-0 transition-all select-none
